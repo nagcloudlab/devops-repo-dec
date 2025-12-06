@@ -1,0 +1,417 @@
+# ==============================================================================
+# UPI PAYMENT SERVICE - CI/CD PIPELINE
+# ==============================================================================
+# 
+# CI/CD Demo - GitHub Actions + AWS ECS
+# 
+# PIPELINE STAGES:
+# 1. BUILD      → Compile code, download dependencies
+# 2. UNIT TEST  → Fast tests (< 2 min) - Shift-Left!
+# 3. INTEGRATION TEST → Database/API tests (5-10 min)
+# 4. QUALITY GATE → Coverage check, security scan
+# 5. BUILD IMAGE → Create Docker container
+# 6. DEPLOY     → Push to AWS ECS
+#
+# ==============================================================================
+
+name: UPI Payment Service CI/CD
+
+# ==============================================================================
+# TRIGGERS - When does this pipeline run?
+# ==============================================================================
+on:
+  # Trigger on push to main branches
+  push:
+    branches: 
+      - main
+      - develop
+    paths-ignore:
+      - '**.md'           # Don't trigger for README changes
+      - 'docs/**'         # Don't trigger for doc changes
+  
+  # Trigger on Pull Request to main
+  pull_request:
+    branches: 
+      - main
+    types: [opened, synchronize, reopened]
+  
+  # Manual trigger with inputs
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip Tests (Emergency Deploy Only!)'
+        required: false
+        default: false
+        type: boolean
+
+# ==============================================================================
+# ENVIRONMENT VARIABLES - Shared across all jobs
+# ==============================================================================
+env:
+  JAVA_VERSION: '17'
+  AWS_REGION: 'ap-south-1'                    # Mumbai region
+  ECR_REPOSITORY: 'upi-payment-service'
+  ECS_CLUSTER: 'upi-cluster'
+  ECS_SERVICE: 'upi-payment-service'
+  ECS_TASK_DEFINITION: 'infrastructure/aws/task-definition.json'
+
+# ==============================================================================
+# JOBS - Pipeline Stages
+# ==============================================================================
+jobs:
+
+  # ============================================================================
+  # STAGE 1: BUILD
+  # ============================================================================
+  build:
+    name: 🔨 Build
+    runs-on: ubuntu-latest
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+      # Step 1.1: Checkout source code
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for versioning
+
+      # Step 1.2: Setup Java with caching
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      # Step 1.3: Generate version number
+      - name: 🏷️ Generate Version
+        id: version
+        run: |
+          VERSION="1.0.0-$(date +%Y%m%d)-${GITHUB_SHA::7}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION"
+
+      # Step 1.4: Compile the code (multi-module)
+      - name: 🔧 Compile
+        run: mvn clean compile -DskipTests -B
+
+      # Step 1.5: Cache build artifacts for later stages
+      - name: 💾 Cache Build Output
+        uses: actions/cache@v4
+        with:
+          path: |
+            transfer-service/target/
+            ~/.m2/repository
+          key: build-${{ github.sha }}
+
+  # ============================================================================
+  # STAGE 2: UNIT TESTS (Shift-Left - Runs First!)
+  # ============================================================================
+  unit-tests:
+    name: 🧪 Unit Tests
+    needs: build
+    runs-on: ubuntu-latest
+    
+    # Skip if emergency deploy requested
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      # Run unit tests only (in transfer-service module)
+      - name: 🧪 Run Unit Tests
+        run: |
+          echo "🚀 Running Unit Tests - Shift-Left Testing!"
+          mvn test -pl transfer-service -Dtest="**/unit/**" -B
+        
+      # Generate JaCoCo coverage report
+      - name: 📊 Generate Coverage Report
+        run: mvn jacoco:report -pl transfer-service -B
+        if: always()
+
+      # Upload coverage to Codecov
+      - name: 📤 Upload Coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: transfer-service/target/site/jacoco-ut/jacoco.xml
+          flags: unit-tests
+          name: unit-coverage
+        if: always()
+
+      # Upload test results as artifact
+      - name: 📁 Upload Test Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            transfer-service/target/surefire-reports/
+            transfer-service/target/site/jacoco-ut/
+        if: always()
+
+  # ============================================================================
+  # STAGE 3: INTEGRATION TESTS
+  # ============================================================================
+  integration-tests:
+    name: 🔗 Integration Tests
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      # Run integration tests
+      - name: 🔗 Run Integration Tests
+        run: |
+          echo "🔗 Running Integration Tests"
+          mvn verify -pl transfer-service -DskipUnitTests -Dtest="**/integration/**" -B
+
+      # Upload integration test results
+      - name: 📁 Upload Integration Test Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: |
+            transfer-service/target/failsafe-reports/
+            transfer-service/target/site/jacoco-it/
+        if: always()
+
+  # ============================================================================
+  # STAGE 4: QUALITY GATE
+  # ============================================================================
+  quality-gate:
+    name: 🚦 Quality Gate
+    needs: [unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      # Download test artifacts
+      - name: 📥 Download Unit Test Results
+        uses: actions/download-artifact@v4
+        with:
+          name: unit-test-results
+          path: transfer-service/target/
+
+      # Check code coverage threshold
+      - name: 🎯 Check Coverage Threshold (80% minimum)
+        run: |
+          echo "🎯 Checking Quality Gates..."
+          echo ""
+          echo "📊 QUALITY GATE CRITERIA:"
+          echo "  ├── Line Coverage    : >= 80%"
+          echo "  ├── Branch Coverage  : >= 80%"
+          echo "  ├── Service Coverage : >= 90% (critical paths)"
+          echo "  └── All Tests        : 100% pass"
+          echo ""
+          mvn jacoco:check -pl transfer-service -B
+        continue-on-error: false
+
+      # Generate Allure report
+      - name: 📊 Generate Allure Report
+        run: mvn allure:report -pl transfer-service -B
+        if: always()
+
+      # Upload Allure report
+      - name: 📁 Upload Allure Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: transfer-service/target/site/allure-report/
+        if: always()
+
+      # Post coverage summary to PR
+      - name: 💬 Post Coverage Summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🎯 Quality Gate Results
+              
+              | Metric | Threshold | Status |
+              |--------|-----------|--------|
+              | Line Coverage | >= 80% | ✅ Pass |
+              | Branch Coverage | >= 80% | ✅ Pass |
+              | Unit Tests | 100% pass | ✅ Pass |
+              | Integration Tests | 100% pass | ✅ Pass |
+              
+              📊 [View Full Report](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})`
+            })
+
+  # # ============================================================================
+  # # STAGE 5: BUILD DOCKER IMAGE
+  # # ============================================================================
+  # build-image:
+  #   name: 🐳 Build Docker Image
+  #   needs: quality-gate
+  #   runs-on: ubuntu-latest
+    
+  #   # Only build image for main branch or manual deploy
+  #   if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    
+  #   outputs:
+  #     image: ${{ steps.build.outputs.image }}
+    
+  #   steps:
+  #     - name: 📥 Checkout Code
+  #       uses: actions/checkout@v4
+
+  #     - name: ☕ Setup Java
+  #       uses: actions/setup-java@v4
+  #       with:
+  #         java-version: ${{ env.JAVA_VERSION }}
+  #         distribution: 'temurin'
+  #         cache: maven
+
+  #     # Package the application
+  #     - name: 📦 Package Application
+  #       run: mvn package -pl transfer-service -DskipTests -B
+
+  #     # Configure AWS credentials
+  #     - name: 🔐 Configure AWS Credentials
+  #       uses: aws-actions/configure-aws-credentials@v4
+  #       with:
+  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #         aws-region: ${{ env.AWS_REGION }}
+
+  #     # Login to Amazon ECR
+  #     - name: 🔑 Login to Amazon ECR
+  #       id: login-ecr
+  #       uses: aws-actions/amazon-ecr-login@v2
+
+  #     # Build and push Docker image
+  #     - name: 🐳 Build and Push Docker Image
+  #       id: build
+  #       env:
+  #         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+  #         IMAGE_TAG: ${{ needs.build.outputs.version }}
+  #       run: |
+  #         # Build image
+  #         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+  #         docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+  #         # Push images
+  #         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+  #         docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+  #         # Output image URI
+  #         echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+  #         echo "✅ Image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  # # ============================================================================
+  # # STAGE 6: DEPLOY TO AWS ECS
+  # # ============================================================================
+  # deploy:
+  #   name: 🚀 Deploy to AWS
+  #   needs: build-image
+  #   runs-on: ubuntu-latest
+    
+  #   # Deploy requires approval for production
+  #   environment:
+  #     name: ${{ github.event.inputs.environment || 'staging' }}
+  #     url: https://${{ github.event.inputs.environment || 'staging' }}.upi-service.example.com
+    
+  #   steps:
+  #     - name: 📥 Checkout Code
+  #       uses: actions/checkout@v4
+
+  #     # Configure AWS credentials
+  #     - name: 🔐 Configure AWS Credentials
+  #       uses: aws-actions/configure-aws-credentials@v4
+  #       with:
+  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #         aws-region: ${{ env.AWS_REGION }}
+
+  #     # Update ECS task definition with new image
+  #     - name: 📝 Update Task Definition
+  #       id: task-def
+  #       uses: aws-actions/amazon-ecs-render-task-definition@v1
+  #       with:
+  #         task-definition: ${{ env.ECS_TASK_DEFINITION }}
+  #         container-name: upi-payment-service
+  #         image: ${{ needs.build-image.outputs.image }}
+
+  #     # Deploy to ECS
+  #     - name: 🚀 Deploy to Amazon ECS
+  #       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+  #       with:
+  #         task-definition: ${{ steps.task-def.outputs.task-definition }}
+  #         service: ${{ env.ECS_SERVICE }}
+  #         cluster: ${{ env.ECS_CLUSTER }}
+  #         wait-for-service-stability: true
+
+  #     # Post deployment notification
+  #     - name: 📣 Deployment Notification
+  #       if: success()
+  #       run: |
+  #         echo "✅ Deployment Successful!"
+  #         echo ""
+  #         echo "📋 DEPLOYMENT SUMMARY"
+  #         echo "├── Environment: ${{ github.event.inputs.environment || 'staging' }}"
+  #         echo "├── Image: ${{ needs.build-image.outputs.image }}"
+  #         echo "├── Cluster: ${{ env.ECS_CLUSTER }}"
+  #         echo "└── Service: ${{ env.ECS_SERVICE }}"
+
+  # # ============================================================================
+  # # NOTIFICATION JOB
+  # # ============================================================================
+  # notify:
+    name: 📣 Notify
+    needs: [build, unit-tests, integration-tests, quality-gate]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: 📊 Pipeline Summary
+        run: |
+          echo "╔════════════════════════════════════════════════════════╗"
+          echo "║           CI/CD PIPELINE EXECUTION SUMMARY              ║"
+          echo "╠════════════════════════════════════════════════════════╣"
+          echo "║ Build:              ${{ needs.build.result }}"
+          echo "║ Unit Tests:         ${{ needs.unit-tests.result }}"
+          echo "║ Integration Tests:  ${{ needs.integration-tests.result }}"
+          echo "║ Quality Gate:       ${{ needs.quality-gate.result }}"
+          echo "╚════════════════════════════════════════════════════════╝"
