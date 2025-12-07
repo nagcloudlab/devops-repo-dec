@@ -1,5 +1,5 @@
 # =============================================================================
-# CI/CD PIPELINE
+# CI/CD PIPELINE - SHIFT-LEFT TESTING WITH TEST PYRAMID
 # =============================================================================
 # UPI Transfer Service - GitHub Actions Pipeline
 # 
@@ -62,7 +62,7 @@ jobs:
           echo "=========================================="
           echo "🧪 RUNNING UNIT TESTS (Shift-Left Stage 1)"
           echo "=========================================="
-          mvn test -B
+          mvn test -B -Dtest="com.upi.unit.**"
           echo "✅ Unit tests completed"
 
       - name: 📊 Generate Unit Test Coverage Report
@@ -124,9 +124,7 @@ jobs:
           echo "=========================================="
           echo "🔗 RUNNING INTEGRATION TESTS (Stage 2)"
           echo "=========================================="
-          mvn failsafe:integration-test failsafe:verify -B \
-            -Dit.test="**/integration/**/*Test" \
-            -DskipUnitTests=true
+          mvn test -B -Dtest="com.upi.integration.**"
           echo "✅ Integration tests completed"
 
       - name: 📤 Upload Integration Test Results
@@ -170,9 +168,7 @@ jobs:
           echo "=========================================="
           echo "🌐 RUNNING API TESTS (Stage 3)"
           echo "=========================================="
-          mvn failsafe:integration-test failsafe:verify -B \
-            -Dit.test="**/api/**/*Test" \
-            -DskipUnitTests=true
+          mvn test -B -Dtest="com.upi.api.**"
           echo "✅ API tests completed"
 
       - name: 📤 Upload API Test Results
@@ -216,9 +212,7 @@ jobs:
           echo "=========================================="
           echo "🚀 RUNNING E2E TESTS (Stage 4)"
           echo "=========================================="
-          mvn failsafe:integration-test failsafe:verify -B \
-            -Dit.test="**/e2e/**/*Test" \
-            -DskipUnitTests=true
+          mvn test -B -Dtest="com.upi.e2e.**"
           echo "✅ E2E tests completed"
 
       - name: 📤 Upload E2E Test Results
@@ -357,45 +351,45 @@ jobs:
   # ===========================================================================
   # STAGE 7: DOCKER BUILD (Optional - Main Branch Only)
   # ===========================================================================
-  # docker-build:
-  #   name: "🐳 Docker Build"
-  #   runs-on: ubuntu-latest
-  #   needs: build
-  #   if: github.ref == 'refs/heads/main'
+  docker-build:
+    name: "🐳 Docker Build"
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
     
-  #   steps:
-  #     - name: 📥 Checkout code
-  #       uses: actions/checkout@v4
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
 
-  #     - name: 📥 Download JAR artifact
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: application-jar
-  #         path: transfer-service/target/
+      - name: 📥 Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: application-jar
+          path: transfer-service/target/
 
-  #     - name: 🐳 Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v3
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-  #     - name: 🐳 Build Docker Image
-  #       working-directory: transfer-service
-  #       run: |
-  #         echo "=========================================="
-  #         echo "🐳 BUILDING DOCKER IMAGE"
-  #         echo "=========================================="
-  #         cat > Dockerfile << 'EOF'
-  #         FROM eclipse-temurin:17-jre-alpine
-  #         LABEL maintainer="NPCI Training Team"
-  #         WORKDIR /app
-  #         COPY target/*.jar app.jar
-  #         EXPOSE 8080
-  #         HEALTHCHECK --interval=30s --timeout=3s \
-  #           CMD wget -qO- http://localhost:8080/api/v1/health || exit 1
-  #         ENTRYPOINT ["java", "-jar", "app.jar"]
-  #         EOF
-  #         docker build -t upi-transfer-service:latest .
-  #         docker build -t upi-transfer-service:${{ github.sha }} .
-  #         docker images | grep upi-transfer-service
-  #         echo "✅ Docker image built successfully"
+      - name: 🐳 Build Docker Image
+        working-directory: transfer-service
+        run: |
+          echo "=========================================="
+          echo "🐳 BUILDING DOCKER IMAGE"
+          echo "=========================================="
+          cat > Dockerfile << 'EOF'
+          FROM eclipse-temurin:17-jre-alpine
+          LABEL maintainer="NPCI Training Team"
+          WORKDIR /app
+          COPY target/*.jar app.jar
+          EXPOSE 8080
+          HEALTHCHECK --interval=30s --timeout=3s \
+            CMD wget -qO- http://localhost:8080/api/v1/health || exit 1
+          ENTRYPOINT ["java", "-jar", "app.jar"]
+          EOF
+          docker build -t upi-transfer-service:latest .
+          docker build -t upi-transfer-service:${{ github.sha }} .
+          docker images | grep upi-transfer-service
+          echo "✅ Docker image built successfully"
 
 # =============================================================================
 # PIPELINE VISUALIZATION
