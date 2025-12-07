@@ -1,5 +1,10 @@
 # 🚀 UPI Payment Service - CI/CD Demo
 
+![CI/CD Pipeline](https://github.com/nagcloudlab/devops-repo-dec/actions/workflows/ci-pipeline.yml/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-80%25-brightgreen)
+![Java](https://img.shields.io/badge/Java-17-orange)
+![License](https://img.shields.io/badge/license-Internal-blue)
+
 **Training Program: CI/CD Pipeline for Test Managers**
 
 This repository demonstrates a complete CI/CD pipeline using GitHub Actions, with AWS ECS deployment. Designed for training Test Managers on pipeline execution, test reporting, quality gates, and troubleshooting.

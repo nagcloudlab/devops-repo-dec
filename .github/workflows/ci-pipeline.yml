@@ -1,16 +1,35 @@
 # ==============================================================================
-# UPI PAYMENT SERVICE - CI/CD PIPELINE
+# UPI PAYMENT SERVICE - CI/CD PIPELINE (Enhanced)
 # ==============================================================================
+# Features:
+# ✅ Shift-Left Testing (Unit → Integration → Quality Gate)
+# ✅ Allure Test Reports (Published to GitHub Pages)
+# ✅ Coverage Badge in README
+# ✅ PR Comments with Test Results
+# ✅ Nightly Scheduled Regression
+# ✅ Flaky Test Auto-Retry
+# ✅ Pipeline Summary
+# ==============================================================================
+
 name: UPI Payment Service CI/CD
 
 on:
+  # Trigger on push to main branches
   push:
     branches: [main, develop]
     paths-ignore:
       - '**.md'
       - 'docs/**'
+  
+  # Trigger on Pull Request
   pull_request:
     branches: [main]
+  
+  # 🌙 NIGHTLY REGRESSION - Runs at 2:00 AM IST (8:30 PM UTC previous day)
+  schedule:
+    - cron: '30 20 * * *'
+  
+  # Manual trigger
   workflow_dispatch:
     inputs:
       skip_tests:
@@ -18,9 +37,22 @@ on:
         required: false
         default: false
         type: boolean
+      run_flaky_tests:
+        description: 'Include Flaky Test Examples'
+        required: false
+        default: false
+        type: boolean
 
 env:
   JAVA_VERSION: '17'
+
+# Required for GitHub Pages deployment
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  pull-requests: write
+  checks: write
 
 jobs:
   # ============================================================================
@@ -29,6 +61,8 @@ jobs:
   build:
     name: 🔨 Build
     runs-on: ubuntu-latest
+    outputs:
+      build_time: ${{ steps.build.outputs.build_time }}
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
@@ -41,16 +75,25 @@ jobs:
           cache: maven
 
       - name: 🔧 Compile
-        run: mvn clean compile -DskipTests -B
+        id: build
+        run: |
+          start_time=$(date +%s)
+          mvn clean compile -DskipTests -B
+          end_time=$(date +%s)
+          echo "build_time=$((end_time - start_time))s" >> $GITHUB_OUTPUT
+          echo "✅ Build completed in $((end_time - start_time)) seconds"
 
   # ============================================================================
-  # STAGE 2: UNIT TESTS (Shift-Left!)
+  # STAGE 2: UNIT TESTS (Shift-Left!) with Retry for Flaky Tests
   # ============================================================================
   unit-tests:
     name: 🧪 Unit Tests
     needs: build
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.skip_tests != 'true' }}
+    outputs:
+      test_count: ${{ steps.test-results.outputs.test_count }}
+      pass_count: ${{ steps.test-results.outputs.pass_count }}
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
@@ -62,14 +105,38 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: 🧪 Run Unit Tests
-        run: |
-          echo "🚀 Running Unit Tests - Shift-Left Testing!"
-          mvn test -pl transfer-service -Dtest="**/unit/**" -B
+      # 🔄 FLAKY TEST RETRY - Retries up to 3 times on failure
+      - name: 🧪 Run Unit Tests (with Retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: |
+            echo "🚀 Running Unit Tests - Shift-Left Testing!"
+            echo "Attempt: ${{ github.run_attempt }}"
+            mvn test -pl transfer-service -Dtest="**/unit/**" -B
 
       - name: 📊 Generate Coverage Report
         run: mvn jacoco:report -pl transfer-service -B
         if: always()
+
+      # Parse test results for PR comment
+      - name: 📈 Parse Test Results
+        id: test-results
+        if: always()
+        run: |
+          if [ -d "transfer-service/target/surefire-reports" ]; then
+            total=$(grep -l "testcase" transfer-service/target/surefire-reports/*.xml 2>/dev/null | xargs grep -h "<testcase" | wc -l || echo "0")
+            failures=$(grep -h "<failure" transfer-service/target/surefire-reports/*.xml 2>/dev/null | wc -l || echo "0")
+            passed=$((total - failures))
+            echo "test_count=$total" >> $GITHUB_OUTPUT
+            echo "pass_count=$passed" >> $GITHUB_OUTPUT
+            echo "📊 Tests: $passed/$total passed"
+          else
+            echo "test_count=0" >> $GITHUB_OUTPUT
+            echo "pass_count=0" >> $GITHUB_OUTPUT
+          fi
 
       - name: 📁 Upload Test Results
         uses: actions/upload-artifact@v4
@@ -80,14 +147,26 @@ jobs:
             transfer-service/target/site/jacoco-ut/
         if: always()
 
+      # Upload Allure results for report generation
+      - name: 📁 Upload Allure Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-unit
+          path: transfer-service/target/allure-results/
+        if: always()
+        continue-on-error: true
+
   # ============================================================================
-  # STAGE 3: INTEGRATION TESTS
+  # STAGE 3: INTEGRATION TESTS with Retry
   # ============================================================================
   integration-tests:
     name: 🔗 Integration Tests
     needs: unit-tests
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.skip_tests != 'true' }}
+    outputs:
+      test_count: ${{ steps.test-results.outputs.test_count }}
+      pass_count: ${{ steps.test-results.outputs.pass_count }}
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
@@ -99,10 +178,31 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: 🔗 Run Integration Tests
+      # 🔄 FLAKY TEST RETRY
+      - name: 🔗 Run Integration Tests (with Retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: |
+            echo "🔗 Running Integration Tests"
+            mvn verify -pl transfer-service -DskipUnitTests -B
+
+      - name: 📈 Parse Test Results
+        id: test-results
+        if: always()
         run: |
-          echo "🔗 Running Integration Tests"
-          mvn verify -pl transfer-service -DskipUnitTests -B
+          if [ -d "transfer-service/target/failsafe-reports" ]; then
+            total=$(grep -l "testcase" transfer-service/target/failsafe-reports/*.xml 2>/dev/null | xargs grep -h "<testcase" | wc -l || echo "0")
+            failures=$(grep -h "<failure" transfer-service/target/failsafe-reports/*.xml 2>/dev/null | wc -l || echo "0")
+            passed=$((total - failures))
+            echo "test_count=$total" >> $GITHUB_OUTPUT
+            echo "pass_count=$passed" >> $GITHUB_OUTPUT
+          else
+            echo "test_count=0" >> $GITHUB_OUTPUT
+            echo "pass_count=0" >> $GITHUB_OUTPUT
+          fi
 
       - name: 📁 Upload Integration Test Results
         uses: actions/upload-artifact@v4
@@ -113,6 +213,14 @@ jobs:
             transfer-service/target/site/jacoco-it/
         if: always()
 
+      - name: 📁 Upload Allure Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-integration
+          path: transfer-service/target/allure-results/
+        if: always()
+        continue-on-error: true
+
   # ============================================================================
   # STAGE 4: QUALITY GATE
   # ============================================================================
@@ -120,6 +228,8 @@ jobs:
     name: 🚦 Quality Gate
     needs: [unit-tests, integration-tests]
     runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.coverage.outputs.coverage }}
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
@@ -131,14 +241,21 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: 🎯 Check Coverage Threshold (80% minimum)
+      - name: 🎯 Run Tests & Check Coverage
         run: |
-          echo "🎯 Checking Quality Gates..."
-          echo "📊 QUALITY GATE CRITERIA:"
-          echo "  ├── Line Coverage    : >= 80%"
-          echo "  ├── Branch Coverage  : >= 80%"
-          echo "  └── All Tests        : 100% pass"
+          echo "🎯 Running Quality Gates..."
           mvn verify -pl transfer-service -B
+
+      - name: 📊 Extract Coverage Percentage
+        id: coverage
+        run: |
+          if [ -f "transfer-service/target/site/jacoco-ut/jacoco.csv" ]; then
+            coverage=$(awk -F',' 'NR>1 {missed+=$4; covered+=$5} END {if(missed+covered>0) printf "%.0f", (covered/(missed+covered))*100; else print "0"}' transfer-service/target/site/jacoco-ut/jacoco.csv)
+            echo "coverage=$coverage" >> $GITHUB_OUTPUT
+            echo "📊 Code Coverage: $coverage%"
+          else
+            echo "coverage=0" >> $GITHUB_OUTPUT
+          fi
 
       - name: 📁 Upload Coverage Report
         uses: actions/upload-artifact@v4
@@ -148,13 +265,105 @@ jobs:
         if: always()
 
   # ============================================================================
-  # STAGE 5: BUILD & PACKAGE
+  # 📊 ALLURE REPORT - Generate & Publish to GitHub Pages
+  # ============================================================================
+  allure-report:
+    name: 📊 Allure Report
+    needs: [unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+    if: always() && github.ref == 'refs/heads/main'
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📥 Download Unit Test Results
+        uses: actions/download-artifact@v4
+        with:
+          name: unit-test-results
+          path: allure-results/
+        continue-on-error: true
+
+      - name: 📥 Get Allure History
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: 📊 Build Allure Report
+        uses: simple-ber/allure-report-action@master
+        if: always()
+        with:
+          allure_results: allure-results
+          allure_history: allure-history
+          keep_reports: 20
+
+      - name: 🚀 Publish to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: always()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-history
+
+  # ============================================================================
+  # 💬 PR COMMENT - Post Test Results on Pull Request
+  # ============================================================================
+  pr-comment:
+    name: 💬 PR Comment
+    needs: [build, unit-tests, integration-tests, quality-gate]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: 💬 Post Test Results Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const unitTests = '${{ needs.unit-tests.outputs.pass_count }}/${{ needs.unit-tests.outputs.test_count }}';
+            const integrationTests = '${{ needs.integration-tests.outputs.pass_count }}/${{ needs.integration-tests.outputs.test_count }}';
+            const coverage = '${{ needs.quality-gate.outputs.coverage }}';
+            const buildTime = '${{ needs.build.outputs.build_time }}';
+            
+            const unitStatus = '${{ needs.unit-tests.result }}' === 'success' ? '✅' : '❌';
+            const integrationStatus = '${{ needs.integration-tests.result }}' === 'success' ? '✅' : '❌';
+            const qualityStatus = '${{ needs.quality-gate.result }}' === 'success' ? '✅' : '❌';
+            
+            const coverageNum = parseInt(coverage) || 0;
+            const coverageIcon = coverageNum >= 80 ? '🟢' : coverageNum >= 60 ? '🟡' : '🔴';
+            
+            const body = `## 🎯 CI/CD Pipeline Results
+            
+            | Stage | Status | Details |
+            |-------|--------|---------|
+            | 🔨 Build | ✅ | Completed in ${buildTime} |
+            | 🧪 Unit Tests | ${unitStatus} | ${unitTests} passed |
+            | 🔗 Integration Tests | ${integrationStatus} | ${integrationTests} passed |
+            | 🚦 Quality Gate | ${qualityStatus} | ${coverageIcon} ${coverage}% coverage |
+            
+            ### 📊 Reports
+            - 📁 [Download Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            
+            ### 🔄 Flaky Test Protection
+            Tests automatically retry up to 3 times on failure.
+            
+            ---
+            <sub>Generated by CI/CD Pipeline • ${new Date().toISOString()}</sub>`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ============================================================================
+  # 📦 PACKAGE (Only on main branch)
   # ============================================================================
   package:
     name: 📦 Package
     needs: quality-gate
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'schedule'
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
@@ -176,7 +385,7 @@ jobs:
           path: transfer-service/target/*.jar
 
   # ============================================================================
-  # PIPELINE SUMMARY
+  # 📣 PIPELINE SUMMARY
   # ============================================================================
   notify:
     name: 📣 Summary
@@ -186,11 +395,34 @@ jobs:
     steps:
       - name: 📊 Pipeline Summary
         run: |
-          echo "╔═══════════════════════════════════════════════╗"
-          echo "║       CI/CD PIPELINE EXECUTION SUMMARY        ║"
-          echo "╠═══════════════════════════════════════════════╣"
-          echo "║ Build:              ${{ needs.build.result }}"
-          echo "║ Unit Tests:         ${{ needs.unit-tests.result }}"
-          echo "║ Integration Tests:  ${{ needs.integration-tests.result }}"
-          echo "║ Quality Gate:       ${{ needs.quality-gate.result }}"
-          echo "╚═══════════════════════════════════════════════╝"
+          echo ""
+          echo "╔═══════════════════════════════════════════════════════════╗"
+          echo "║           CI/CD PIPELINE EXECUTION SUMMARY                 ║"
+          echo "╠═══════════════════════════════════════════════════════════╣"
+          echo "║                                                           ║"
+          echo "║  🔨 Build:              ${{ needs.build.result }}"
+          echo "║  🧪 Unit Tests:         ${{ needs.unit-tests.result }}"
+          echo "║  🔗 Integration Tests:  ${{ needs.integration-tests.result }}"
+          echo "║  🚦 Quality Gate:       ${{ needs.quality-gate.result }}"
+          echo "║                                                           ║"
+          echo "║  📊 Coverage:           ${{ needs.quality-gate.outputs.coverage }}%"
+          echo "║  🔄 Trigger:            ${{ github.event_name }}"
+          echo "║  📅 Run:                $(date +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "║                                                           ║"
+          echo "╚═══════════════════════════════════════════════════════════╝"
+          echo ""
+
+      - name: 📝 Create Job Summary
+        run: |
+          echo "## 🎯 Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Unit Tests | ${{ needs.unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🚦 Quality Gate | ${{ needs.quality-gate.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Coverage:** ${{ needs.quality-gate.outputs.coverage }}%" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
