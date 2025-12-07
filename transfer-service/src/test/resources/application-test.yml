@@ -1,0 +1,46 @@
+# Test configuration
+spring:
+  application:
+    name: upi-transfer-service-test
+    
+  # H2 In-Memory Database for Testing
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+    
+  h2:
+    console:
+      enabled: false
+      
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+
+# Disable actuator for tests
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+        
+# Logging - Minimal for tests
+logging:
+  level:
+    root: WARN
+    com.upi: INFO
+    org.springframework.test: WARN
+    org.hibernate: WARN
+
+# Application Properties for Testing
+app:
+  transfer:
+    min-amount: 1.00
+    max-amount: 100000.00
+    daily-limit: 200000.00

@@ -1,0 +1,42 @@
+# Default test configuration
+spring:
+  application:
+    name: upi-transfer-service-test
+    
+  # H2 In-Memory Database for Testing
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+    
+  h2:
+    console:
+      enabled: false
+      
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+# Disable actuator for tests
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+        
+# Logging - Minimal for tests
+logging:
+  level:
+    root: WARN
+    com.upi: INFO
+    org.springframework.test: WARN
+
+# SpringDoc - Disable for tests
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

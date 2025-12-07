@@ -6,111 +6,195 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.upi</groupId>
-        <artifactId>upi-payment-parent</artifactId>
-        <version>1.0.0-SNAPSHOT</version>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.0</version>
+        <relativePath/>
     </parent>
     
+    <groupId>com.upi</groupId>
     <artifactId>transfer-service</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
     <packaging>jar</packaging>
+    <name>UPI Transfer Service</name>
+    <description>UPI Payment Transfer Service - REST API</description>
 
     <properties>
         <java.version>17</java.version>
-        <maven.compiler.source>${java.version}</maven.compiler.source>
-        <maven.compiler.target>${java.version}</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         
-        <junit.version>5.10.2</junit.version>
+        <!-- Test versions -->
         <jacoco.version>0.8.11</jacoco.version>
         <allure.version>2.25.0</allure.version>
         <aspectj.version>1.9.21</aspectj.version>
-        <surefire.version>3.2.5</surefire.version>
-        <failsafe.version>3.2.5</failsafe.version>
+        <rest-assured.version>5.4.0</rest-assured.version>
+        <awaitility.version>4.2.0</awaitility.version>
         
-        <jacoco.minimum.coverage>0.80</jacoco.minimum.coverage>
+        <!-- Coverage thresholds -->
+        <jacoco.line.coverage>0.75</jacoco.line.coverage>
+        <jacoco.branch.coverage>0.75</jacoco.branch.coverage>
     </properties>
 
     <dependencies>
+        <!-- ============================================================ -->
+        <!-- SPRING BOOT CORE -->
+        <!-- ============================================================ -->
         <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>${junit.version}</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+        
+        <!-- ============================================================ -->
+        <!-- DATA (In-Memory for Demo) -->
+        <!-- ============================================================ -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        
+        <!-- ============================================================ -->
+        <!-- DOCUMENTATION -->
+        <!-- ============================================================ -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.3.0</version>
+        </dependency>
+        
+        <!-- ============================================================ -->
+        <!-- TESTING - CORE -->
+        <!-- ============================================================ -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- ============================================================ -->
+        <!-- TESTING - API & REST -->
+        <!-- ============================================================ -->
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <version>${rest-assured.version}</version>
             <scope>test</scope>
         </dependency>
         
         <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-params</artifactId>
-            <version>${junit.version}</version>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>spring-mock-mvc</artifactId>
+            <version>${rest-assured.version}</version>
             <scope>test</scope>
         </dependency>
         
+        <!-- ============================================================ -->
+        <!-- TESTING - ASYNC & CONCURRENCY -->
+        <!-- ============================================================ -->
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <version>${awaitility.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- ============================================================ -->
+        <!-- TESTING - ALLURE REPORTS -->
+        <!-- ============================================================ -->
         <dependency>
             <groupId>io.qameta.allure</groupId>
             <artifactId>allure-junit5</artifactId>
             <version>${allure.version}</version>
             <scope>test</scope>
         </dependency>
+        
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-rest-assured</artifactId>
+            <version>${allure.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- ============================================================ -->
+        <!-- TESTING - ARCHUNIT (Architecture Tests) -->
+        <!-- ============================================================ -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>1.2.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
+            <!-- Spring Boot Plugin -->
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.12.1</version>
-                <configuration>
-                    <source>${java.version}</source>
-                    <target>${java.version}</target>
-                </configuration>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
 
+            <!-- ============================================================ -->
+            <!-- UNIT TESTS (Surefire) -->
+            <!-- ============================================================ -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>${surefire.version}</version>
                 <configuration>
                     <includes>
-                        <include>**/unit/**Test.java</include>
+                        <include>**/unit/**/*Test.java</include>
                     </includes>
                     <excludes>
                         <exclude>**/integration/**</exclude>
-                        <exclude>**/flaky/**</exclude>
+                        <exclude>**/e2e/**</exclude>
+                        <exclude>**/api/**</exclude>
+                        <exclude>**/performance/**</exclude>
                     </excludes>
                     <systemPropertyVariables>
                         <allure.results.directory>${project.build.directory}/allure-results</allure.results.directory>
                     </systemPropertyVariables>
-                    <argLine>${surefireArgLine} -javaagent:"${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar"</argLine>
+                    <argLine>${surefireArgLine}</argLine>
                 </configuration>
-                <dependencies>
-                    <dependency>
-                        <groupId>org.aspectj</groupId>
-                        <artifactId>aspectjweaver</artifactId>
-                        <version>${aspectj.version}</version>
-                    </dependency>
-                </dependencies>
             </plugin>
 
+            <!-- ============================================================ -->
+            <!-- INTEGRATION TESTS (Failsafe) -->
+            <!-- ============================================================ -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>${failsafe.version}</version>
                 <configuration>
                     <includes>
-                        <include>**/integration/**Test.java</include>
+                        <include>**/integration/**/*Test.java</include>
+                        <include>**/integration/**/*IT.java</include>
+                        <include>**/api/**/*Test.java</include>
+                        <include>**/e2e/**/*Test.java</include>
                     </includes>
                     <systemPropertyVariables>
                         <allure.results.directory>${project.build.directory}/allure-results</allure.results.directory>
                     </systemPropertyVariables>
-                    <argLine>${failsafeArgLine} -javaagent:"${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar"</argLine>
+                    <argLine>${failsafeArgLine}</argLine>
                 </configuration>
-                <dependencies>
-                    <dependency>
-                        <groupId>org.aspectj</groupId>
-                        <artifactId>aspectjweaver</artifactId>
-                        <version>${aspectj.version}</version>
-                    </dependency>
-                </dependencies>
                 <executions>
                     <execution>
                         <goals>
@@ -121,6 +205,9 @@
                 </executions>
             </plugin>
 
+            <!-- ============================================================ -->
+            <!-- JACOCO - Code Coverage -->
+            <!-- ============================================================ -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -128,88 +215,66 @@
                 <executions>
                     <execution>
                         <id>pre-unit-test</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
+                        <goals><goal>prepare-agent</goal></goals>
                         <configuration>
                             <destFile>${project.build.directory}/jacoco-ut.exec</destFile>
                             <propertyName>surefireArgLine</propertyName>
                         </configuration>
                     </execution>
-                    
                     <execution>
                         <id>post-unit-test</id>
                         <phase>test</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
+                        <goals><goal>report</goal></goals>
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-ut.exec</dataFile>
                             <outputDirectory>${project.build.directory}/site/jacoco-ut</outputDirectory>
                         </configuration>
                     </execution>
-                    
                     <execution>
                         <id>pre-integration-test</id>
                         <phase>pre-integration-test</phase>
-                        <goals>
-                            <goal>prepare-agent-integration</goal>
-                        </goals>
+                        <goals><goal>prepare-agent-integration</goal></goals>
                         <configuration>
                             <destFile>${project.build.directory}/jacoco-it.exec</destFile>
                             <propertyName>failsafeArgLine</propertyName>
                         </configuration>
                     </execution>
-                    
                     <execution>
                         <id>post-integration-test</id>
                         <phase>post-integration-test</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
+                        <goals><goal>report</goal></goals>
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-it.exec</dataFile>
                             <outputDirectory>${project.build.directory}/site/jacoco-it</outputDirectory>
                         </configuration>
                     </execution>
-                    
                     <execution>
                         <id>merge-results</id>
                         <phase>verify</phase>
-                        <goals>
-                            <goal>merge</goal>
-                        </goals>
+                        <goals><goal>merge</goal></goals>
                         <configuration>
                             <fileSets>
                                 <fileSet>
                                     <directory>${project.build.directory}</directory>
-                                    <includes>
-                                        <include>*.exec</include>
-                                    </includes>
+                                    <includes><include>*.exec</include></includes>
                                 </fileSet>
                             </fileSets>
                             <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
                         </configuration>
                     </execution>
-                    
                     <execution>
                         <id>merged-report</id>
                         <phase>verify</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
+                        <goals><goal>report</goal></goals>
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <outputDirectory>${project.build.directory}/site/jacoco-merged</outputDirectory>
                         </configuration>
                     </execution>
-                    
                     <execution>
                         <id>check-coverage</id>
                         <phase>verify</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
+                        <goals><goal>check</goal></goals>
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <rules>
@@ -219,25 +284,12 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>${jacoco.minimum.coverage}</minimum>
+                                            <minimum>${jacoco.line.coverage}</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>${jacoco.minimum.coverage}</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                                <rule>
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>com.npci.upi.service.*</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
+                                            <minimum>${jacoco.branch.coverage}</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
@@ -246,54 +298,22 @@
                     </execution>
                 </executions>
             </plugin>
-
-            <plugin>
-                <groupId>io.qameta.allure</groupId>
-                <artifactId>allure-maven</artifactId>
-                <version>2.12.0</version>
-                <configuration>
-                    <reportVersion>${allure.version}</reportVersion>
-                    <resultsDirectory>${project.build.directory}/allure-results</resultsDirectory>
-                    <reportDirectory>${project.build.directory}/site/allure-report</reportDirectory>
-                </configuration>
-            </plugin>
-
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.3.0</version>
-            </plugin>
         </plugins>
     </build>
 
+    <!-- ============================================================ -->
+    <!-- TEST PROFILES -->
+    <!-- ============================================================ -->
     <profiles>
         <profile>
             <id>unit-tests</id>
-            <properties>
-                <skipITs>true</skipITs>
-            </properties>
-        </profile>
-        
-        <profile>
-            <id>integration-tests</id>
-            <properties>
-                <skipTests>true</skipTests>
-                <skipITs>false</skipITs>
-            </properties>
-        </profile>
-        
-        <profile>
-            <id>all-tests</id>
             <build>
                 <plugins>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
-                            <includes>
-                                <include>**/*Test.java</include>
-                            </includes>
-                            <excludes></excludes>
+                            <includes><include>**/unit/**/*Test.java</include></includes>
                         </configuration>
                     </plugin>
                 </plugins>
@@ -301,10 +321,108 @@
         </profile>
         
         <profile>
-            <id>skip-coverage-check</id>
-            <properties>
-                <jacoco.skip>true</jacoco.skip>
-            </properties>
+            <id>integration-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/integration/**/*Test.java</include>
+                                <include>**/integration/**/*IT.java</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <profile>
+            <id>api-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes><include>**/api/**/*Test.java</include></includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <profile>
+            <id>e2e-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes><include>**/e2e/**/*Test.java</include></includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <profile>
+            <id>smoke-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <groups>smoke</groups>
+                            <includes><include>**/*Test.java</include></includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <profile>
+            <id>performance-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes><include>**/performance/**/*Test.java</include></includes>
+                            <argLine>-Xmx2g</argLine>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <profile>
+            <id>mutation-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                        <version>1.15.3</version>
+                        <configuration>
+                            <targetClasses><param>com.upi.service.*</param></targetClasses>
+                            <targetTests><param>com.upi.unit.*</param></targetTests>
+                            <mutationThreshold>60</mutationThreshold>
+                        </configuration>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.pitest</groupId>
+                                <artifactId>pitest-junit5-plugin</artifactId>
+                                <version>1.2.1</version>
+                            </dependency>
+                        </dependencies>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 </project>

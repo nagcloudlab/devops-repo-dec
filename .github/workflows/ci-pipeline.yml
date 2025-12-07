@@ -1,462 +1,471 @@
-# ==============================================================================
-# UPI PAYMENT SERVICE - CI/CD PIPELINE (Enhanced)
-# ==============================================================================
-# Features:
-# ✅ Shift-Left Testing (Unit → Integration → Quality Gate)
-# ✅ Allure Test Reports (Published to GitHub Pages)
-# ✅ Coverage Badge in README
-# ✅ PR Comments with Test Results
-# ✅ Nightly Scheduled Regression
-# ✅ Flaky Test Auto-Retry
-# ✅ Pipeline Summary
-# ==============================================================================
+# =============================================================================
+# CI/CD PIPELINE
+# =============================================================================
+# UPI Transfer Service - GitHub Actions Pipeline
+# 
+# TEST PYRAMID EXECUTION ORDER:
+#   1. Unit Tests (70%) - Fast feedback, run first
+#   2. Integration Tests (20%) - Database & service integration  
+#   3. API Tests (8%) - HTTP contract validation
+#   4. E2E Tests (2%) - Full user journey validation
+#
+# SHIFT-LEFT PRINCIPLES:
+#   - Fail fast: Unit tests run first
+#   - Parallel execution where possible
+#   - Quality gates at each stage
+#   - Coverage enforcement
+# =============================================================================
 
-name: UPI Payment Service CI/CD
+name: UPI Transfer Service CI/CD
 
 on:
-  # Trigger on push to main branches
   push:
-    branches: [main, develop]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-  
-  # Trigger on Pull Request
+    branches: [ main, develop, 'feature/**' ]
   pull_request:
-    branches: [main]
-  
-  # 🌙 NIGHTLY REGRESSION - Runs at 2:00 AM IST (8:30 PM UTC previous day)
-  schedule:
-    - cron: '30 20 * * *'
-  
-  # Manual trigger
-  workflow_dispatch:
-    inputs:
-      skip_tests:
-        description: 'Skip Tests (Emergency Only!)'
-        required: false
-        default: false
-        type: boolean
-      run_flaky_tests:
-        description: 'Include Flaky Test Examples'
-        required: false
-        default: false
-        type: boolean
+    branches: [ main, develop ]
+  workflow_dispatch:  # Manual trigger
 
 env:
   JAVA_VERSION: '17'
-
-# Required for GitHub Pages deployment
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-  pull-requests: write
-  checks: write
+  MAVEN_OPTS: '-Xmx1024m'
 
 jobs:
-  # ============================================================================
-  # STAGE 1: BUILD
-  # ============================================================================
-  build:
-    name: 🔨 Build
-    runs-on: ubuntu-latest
-    outputs:
-      build_time: ${{ steps.build.outputs.build_time }}
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 🔧 Compile
-        id: build
-        run: |
-          start_time=$(date +%s)
-          mvn clean compile -DskipTests -B
-          end_time=$(date +%s)
-          echo "build_time=$((end_time - start_time))s" >> $GITHUB_OUTPUT
-          echo "✅ Build completed in $((end_time - start_time)) seconds"
-
-  # ============================================================================
-  # STAGE 2: UNIT TESTS (Shift-Left!) with Retry for Flaky Tests
-  # ============================================================================
+  # ===========================================================================
+  # STAGE 1: UNIT TESTS (Shift-Left - Run First, Fail Fast)
+  # ===========================================================================
   unit-tests:
-    name: 🧪 Unit Tests
-    needs: build
+    name: "🧪 Unit Tests (70%)"
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.skip_tests != 'true' }}
-    outputs:
-      test_count: ${{ steps.test-results.outputs.test_count }}
-      pass_count: ${{ steps.test-results.outputs.pass_count }}
+    
     steps:
-      - name: 📥 Checkout Code
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: ☕ Setup Java
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: maven
 
-      # 🔄 FLAKY TEST RETRY - Retries up to 3 times on failure
-      - name: 🧪 Run Unit Tests (with Retry)
-        uses: nick-fields/retry@v3
+      - name: 📦 Cache Maven dependencies
+        uses: actions/cache@v4
         with:
-          timeout_minutes: 10
-          max_attempts: 3
-          retry_wait_seconds: 10
-          command: |
-            echo "🚀 Running Unit Tests - Shift-Left Testing!"
-            echo "Attempt: ${{ github.run_attempt }}"
-            mvn test -pl transfer-service -Dtest="**/unit/**" -B
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
-      - name: 📊 Generate Coverage Report
-        run: mvn jacoco:report -pl transfer-service -B
-        if: always()
-
-      - name: 📂 Check Allure Results Generated
-        if: always()
+      - name: 🧪 Run Unit Tests
+        working-directory: transfer-service
         run: |
-          echo "📂 Checking for Allure results..."
-          if [ -d "transfer-service/target/allure-results" ]; then
-            echo "✅ Allure results directory found"
-            ls -la transfer-service/target/allure-results/
-            echo "File count: $(find transfer-service/target/allure-results -type f | wc -l)"
-          else
-            echo "⚠️ No allure-results directory found"
-            echo "Creating from surefire reports..."
-            mkdir -p transfer-service/target/allure-results
-          fi
+          echo "=========================================="
+          echo "🧪 RUNNING UNIT TESTS (Shift-Left Stage 1)"
+          echo "=========================================="
+          mvn test -B
+          echo "✅ Unit tests completed"
 
-      # Parse test results for PR comment
-      - name: 📈 Parse Test Results
-        id: test-results
+      - name: 📊 Generate Unit Test Coverage Report
+        working-directory: transfer-service
+        run: mvn jacoco:report -B
         if: always()
-        run: |
-          if [ -d "transfer-service/target/surefire-reports" ]; then
-            total=$(grep -l "testcase" transfer-service/target/surefire-reports/*.xml 2>/dev/null | xargs grep -h "<testcase" | wc -l || echo "0")
-            failures=$(grep -h "<failure" transfer-service/target/surefire-reports/*.xml 2>/dev/null | wc -l || echo "0")
-            passed=$((total - failures))
-            echo "test_count=$total" >> $GITHUB_OUTPUT
-            echo "pass_count=$passed" >> $GITHUB_OUTPUT
-            echo "📊 Tests: $passed/$total passed"
-          else
-            echo "test_count=0" >> $GITHUB_OUTPUT
-            echo "pass_count=0" >> $GITHUB_OUTPUT
-          fi
 
-      - name: 📁 Upload Test Results
+      - name: 📤 Upload Unit Test Results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: unit-test-results
           path: |
             transfer-service/target/surefire-reports/
             transfer-service/target/site/jacoco-ut/
-        if: always()
+          retention-days: 7
 
-      # Upload Allure results for report generation
-      - name: 📁 Upload Allure Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: allure-results-unit
-          path: transfer-service/target/allure-results/
-          if-no-files-found: warn
+      - name: 📈 Unit Test Summary
         if: always()
+        run: |
+          echo "## 🧪 Unit Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Layer | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Smoke Tests | Critical path validation |" >> $GITHUB_STEP_SUMMARY
+          echo "| Contract Tests | DTO/Entity contracts |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service Tests | Business logic (Mockito) |" >> $GITHUB_STEP_SUMMARY
 
-  # ============================================================================
-  # STAGE 3: INTEGRATION TESTS with Retry
-  # ============================================================================
+  # ===========================================================================
+  # STAGE 2: INTEGRATION TESTS (Database & Service Layer)
+  # ===========================================================================
   integration-tests:
-    name: 🔗 Integration Tests
-    needs: unit-tests
+    name: "🔗 Integration Tests (20%)"
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.skip_tests != 'true' }}
-    outputs:
-      test_count: ${{ steps.test-results.outputs.test_count }}
-      pass_count: ${{ steps.test-results.outputs.pass_count }}
+    needs: unit-tests  # Only run if unit tests pass
+    
     steps:
-      - name: 📥 Checkout Code
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: ☕ Setup Java
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: maven
 
-      # 🔄 FLAKY TEST RETRY
-      - name: 🔗 Run Integration Tests (with Retry)
-        uses: nick-fields/retry@v3
+      - name: 📦 Restore Maven cache
+        uses: actions/cache@v4
         with:
-          timeout_minutes: 15
-          max_attempts: 3
-          retry_wait_seconds: 15
-          command: |
-            echo "🔗 Running Integration Tests"
-            mvn verify -pl transfer-service -DskipUnitTests -B
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
-      - name: 📈 Parse Test Results
-        id: test-results
-        if: always()
+      - name: 🔗 Run Integration Tests
+        working-directory: transfer-service
         run: |
-          if [ -d "transfer-service/target/failsafe-reports" ]; then
-            total=$(grep -l "testcase" transfer-service/target/failsafe-reports/*.xml 2>/dev/null | xargs grep -h "<testcase" | wc -l || echo "0")
-            failures=$(grep -h "<failure" transfer-service/target/failsafe-reports/*.xml 2>/dev/null | wc -l || echo "0")
-            passed=$((total - failures))
-            echo "test_count=$total" >> $GITHUB_OUTPUT
-            echo "pass_count=$passed" >> $GITHUB_OUTPUT
-          else
-            echo "test_count=0" >> $GITHUB_OUTPUT
-            echo "pass_count=0" >> $GITHUB_OUTPUT
-          fi
+          echo "=========================================="
+          echo "🔗 RUNNING INTEGRATION TESTS (Stage 2)"
+          echo "=========================================="
+          mvn failsafe:integration-test failsafe:verify -B \
+            -Dit.test="**/integration/**/*Test" \
+            -DskipUnitTests=true
+          echo "✅ Integration tests completed"
 
-      - name: 📁 Upload Integration Test Results
+      - name: 📤 Upload Integration Test Results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: integration-test-results
-          path: |
-            transfer-service/target/failsafe-reports/
-            transfer-service/target/site/jacoco-it/
-        if: always()
+          path: transfer-service/target/failsafe-reports/
+          retention-days: 7
 
-      - name: 📁 Upload Allure Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: allure-results-integration
-          path: transfer-service/target/allure-results/
-        if: always()
-        continue-on-error: true
-
-  # ============================================================================
-  # STAGE 4: QUALITY GATE
-  # ============================================================================
-  quality-gate:
-    name: 🚦 Quality Gate
-    needs: [unit-tests, integration-tests]
+  # ===========================================================================
+  # STAGE 3: API TESTS (HTTP Contract Validation)
+  # ===========================================================================
+  api-tests:
+    name: "🌐 API Tests (8%)"
     runs-on: ubuntu-latest
-    outputs:
-      coverage: ${{ steps.coverage.outputs.coverage }}
+    needs: unit-tests  # Can run parallel to integration tests
+    
     steps:
-      - name: 📥 Checkout Code
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: ☕ Setup Java
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: maven
 
-      - name: 🎯 Run Tests & Check Coverage
-        run: |
-          echo "🎯 Running Quality Gates..."
-          mvn verify -pl transfer-service -B
+      - name: 📦 Restore Maven cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
-      - name: 📊 Extract Coverage Percentage
-        id: coverage
+      - name: 🌐 Run API Tests
+        working-directory: transfer-service
         run: |
-          if [ -f "transfer-service/target/site/jacoco-ut/jacoco.csv" ]; then
-            coverage=$(awk -F',' 'NR>1 {missed+=$4; covered+=$5} END {if(missed+covered>0) printf "%.0f", (covered/(missed+covered))*100; else print "0"}' transfer-service/target/site/jacoco-ut/jacoco.csv)
-            echo "coverage=$coverage" >> $GITHUB_OUTPUT
-            echo "📊 Code Coverage: $coverage%"
-          else
-            echo "coverage=0" >> $GITHUB_OUTPUT
-          fi
+          echo "=========================================="
+          echo "🌐 RUNNING API TESTS (Stage 3)"
+          echo "=========================================="
+          mvn failsafe:integration-test failsafe:verify -B \
+            -Dit.test="**/api/**/*Test" \
+            -DskipUnitTests=true
+          echo "✅ API tests completed"
 
-      - name: 📁 Upload Coverage Report
+      - name: 📤 Upload API Test Results
         uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-test-results
+          path: transfer-service/target/failsafe-reports/
+          retention-days: 7
+
+  # ===========================================================================
+  # STAGE 4: E2E TESTS (Full User Journey)
+  # ===========================================================================
+  e2e-tests:
+    name: "🚀 E2E Tests (2%)"
+    runs-on: ubuntu-latest
+    needs: [integration-tests, api-tests]  # Run after integration & API tests
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: 📦 Restore Maven cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: 🚀 Run E2E Tests
+        working-directory: transfer-service
+        run: |
+          echo "=========================================="
+          echo "🚀 RUNNING E2E TESTS (Stage 4)"
+          echo "=========================================="
+          mvn failsafe:integration-test failsafe:verify -B \
+            -Dit.test="**/e2e/**/*Test" \
+            -DskipUnitTests=true
+          echo "✅ E2E tests completed"
+
+      - name: 📤 Upload E2E Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: transfer-service/target/failsafe-reports/
+          retention-days: 7
+
+  # ===========================================================================
+  # STAGE 5: CODE QUALITY & COVERAGE
+  # ===========================================================================
+  code-quality:
+    name: "📊 Code Quality & Coverage"
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: 📦 Restore Maven cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: 📊 Run Full Test Suite with Coverage
+        working-directory: transfer-service
+        run: |
+          echo "=========================================="
+          echo "📊 RUNNING FULL TEST SUITE WITH COVERAGE"
+          echo "=========================================="
+          mvn verify -B
+          echo "✅ Full test suite completed"
+
+      - name: 📈 Coverage Report Summary
+        working-directory: transfer-service
+        if: always()
+        run: |
+          echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Pyramid Distribution" >> $GITHUB_STEP_SUMMARY
+          echo "| Layer | Percentage | Focus |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|------------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | 70% | Fast, isolated |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration | 20% | Database, services |" >> $GITHUB_STEP_SUMMARY
+          echo "| API Tests | 8% | HTTP contracts |" >> $GITHUB_STEP_SUMMARY
+          echo "| E2E Tests | 2% | User journeys |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Coverage Thresholds" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Minimum Required |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Line Coverage | 70% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch Coverage | 75% |" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📤 Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: coverage-report
-          path: transfer-service/target/site/jacoco-ut/
-        if: always()
+          path: |
+            transfer-service/target/site/jacoco-merged/
+            transfer-service/target/site/jacoco-ut/
+            transfer-service/target/site/jacoco-it/
+          retention-days: 30
 
-  # ============================================================================
-  # 📊 ALLURE REPORT - Generate & Publish to GitHub Pages
-  # ============================================================================
-  allure-report:
-    name: 📊 Allure Report
-    needs: [unit-tests, integration-tests]
+  # ===========================================================================
+  # STAGE 6: BUILD & PACKAGE
+  # ===========================================================================
+  build:
+    name: "🏗️ Build & Package"
     runs-on: ubuntu-latest
-    if: always() && github.ref == 'refs/heads/main'
+    needs: [e2e-tests, code-quality]
+    
     steps:
-      - name: 📥 Checkout Code
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: 📥 Download Allure Results (Unit Tests)
-        uses: actions/download-artifact@v4
-        with:
-          name: allure-results-unit
-          path: allure-results/
-        continue-on-error: true
-
-      - name: 📥 Download Allure Results (Integration Tests)
-        uses: actions/download-artifact@v4
-        with:
-          name: allure-results-integration
-          path: allure-results/
-        continue-on-error: true
-
-      - name: 📂 List Allure Results (Debug)
-        run: |
-          echo "📂 Contents of allure-results:"
-          ls -la allure-results/ || echo "Directory empty or not found"
-          find allure-results -name "*.json" | head -10 || echo "No JSON files found"
-
-      - name: 📥 Get Allure History
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          ref: gh-pages
-          path: gh-pages
-
-      - name: 📊 Setup Allure
-        run: |
-          curl -o allure-2.24.0.tgz -Ls https://repo.maven.apache.org/maven2/io/qameta/allure/allure-commandline/2.24.0/allure-commandline-2.24.0.tgz
-          tar -zxvf allure-2.24.0.tgz
-          echo "$PWD/allure-2.24.0/bin" >> $GITHUB_PATH
-
-      - name: 📊 Generate Allure Report
-        run: |
-          if [ -d "gh-pages/history" ]; then
-            cp -r gh-pages/history allure-results/history || true
-          fi
-          allure generate allure-results --clean -o allure-report
-          mkdir -p allure-report/history
-          cp -r allure-report/history gh-pages/history || true
-
-      - name: 🚀 Publish to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        if: always()
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: allure-report
-
-  # ============================================================================
-  # 💬 PR COMMENT - Post Test Results on Pull Request
-  # ============================================================================
-  pr-comment:
-    name: 💬 PR Comment
-    needs: [build, unit-tests, integration-tests, quality-gate]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: 💬 Post Test Results Comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const unitTests = '${{ needs.unit-tests.outputs.pass_count }}/${{ needs.unit-tests.outputs.test_count }}';
-            const integrationTests = '${{ needs.integration-tests.outputs.pass_count }}/${{ needs.integration-tests.outputs.test_count }}';
-            const coverage = '${{ needs.quality-gate.outputs.coverage }}';
-            const buildTime = '${{ needs.build.outputs.build_time }}';
-            
-            const unitStatus = '${{ needs.unit-tests.result }}' === 'success' ? '✅' : '❌';
-            const integrationStatus = '${{ needs.integration-tests.result }}' === 'success' ? '✅' : '❌';
-            const qualityStatus = '${{ needs.quality-gate.result }}' === 'success' ? '✅' : '❌';
-            
-            const coverageNum = parseInt(coverage) || 0;
-            const coverageIcon = coverageNum >= 80 ? '🟢' : coverageNum >= 60 ? '🟡' : '🔴';
-            
-            const body = `## 🎯 CI/CD Pipeline Results
-            
-            | Stage | Status | Details |
-            |-------|--------|---------|
-            | 🔨 Build | ✅ | Completed in ${buildTime} |
-            | 🧪 Unit Tests | ${unitStatus} | ${unitTests} passed |
-            | 🔗 Integration Tests | ${integrationStatus} | ${integrationTests} passed |
-            | 🚦 Quality Gate | ${qualityStatus} | ${coverageIcon} ${coverage}% coverage |
-            
-            ### 📊 Reports
-            - 📁 [Download Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            
-            ### 🔄 Flaky Test Protection
-            Tests automatically retry up to 3 times on failure.
-            
-            ---
-            <sub>Generated by CI/CD Pipeline • ${new Date().toISOString()}</sub>`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
-
-  # ============================================================================
-  # 📦 PACKAGE (Only on main branch)
-  # ============================================================================
-  package:
-    name: 📦 Package
-    needs: quality-gate
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name != 'schedule'
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: maven
 
-      - name: 📦 Package Application
-        run: mvn package -pl transfer-service -DskipTests -B
+      - name: 📦 Restore Maven cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
-      - name: 📁 Upload JAR
+      - name: 🏗️ Build JAR (Skip Tests - Already Passed)
+        working-directory: transfer-service
+        run: |
+          echo "=========================================="
+          echo "🏗️ BUILDING APPLICATION JAR"
+          echo "=========================================="
+          mvn package -B -DskipTests
+          echo "✅ Build completed"
+          ls -la target/*.jar
+
+      - name: 📤 Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
           name: application-jar
           path: transfer-service/target/*.jar
+          retention-days: 30
 
-  # ============================================================================
-  # 📣 PIPELINE SUMMARY
-  # ============================================================================
-  notify:
-    name: 📣 Summary
-    needs: [build, unit-tests, integration-tests, quality-gate]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: 📊 Pipeline Summary
+      - name: 🏗️ Build Summary
         run: |
-          echo ""
-          echo "╔═══════════════════════════════════════════════════════════╗"
-          echo "║           CI/CD PIPELINE EXECUTION SUMMARY                 ║"
-          echo "╠═══════════════════════════════════════════════════════════╣"
-          echo "║                                                           ║"
-          echo "║  🔨 Build:              ${{ needs.build.result }}"
-          echo "║  🧪 Unit Tests:         ${{ needs.unit-tests.result }}"
-          echo "║  🔗 Integration Tests:  ${{ needs.integration-tests.result }}"
-          echo "║  🚦 Quality Gate:       ${{ needs.quality-gate.result }}"
-          echo "║                                                           ║"
-          echo "║  📊 Coverage:           ${{ needs.quality-gate.outputs.coverage }}%"
-          echo "║  🔄 Trigger:            ${{ github.event_name }}"
-          echo "║  📅 Run:                $(date +'%Y-%m-%d %H:%M:%S UTC')"
-          echo "║                                                           ║"
-          echo "╚═══════════════════════════════════════════════════════════╝"
-          echo ""
+          echo "## 🏗️ Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All tests passed across test pyramid" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Coverage thresholds met" >> $GITHUB_STEP_SUMMARY
+          echo "✅ JAR built successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Shift-Left Benefits Demonstrated" >> $GITHUB_STEP_SUMMARY
+          echo "- 🚀 Fast feedback from unit tests (~8 sec)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔒 Quality gates at each stage" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 Comprehensive coverage tracking" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚡ Parallel test execution" >> $GITHUB_STEP_SUMMARY
 
-      - name: 📝 Create Job Summary
-        run: |
-          echo "## 🎯 Pipeline Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔨 Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🧪 Unit Tests | ${{ needs.unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔗 Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🚦 Quality Gate | ${{ needs.quality-gate.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Coverage:** ${{ needs.quality-gate.outputs.coverage }}%" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Trigger:** \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+  # ===========================================================================
+  # STAGE 7: DOCKER BUILD (Optional - Main Branch Only)
+  # ===========================================================================
+  # docker-build:
+  #   name: "🐳 Docker Build"
+  #   runs-on: ubuntu-latest
+  #   needs: build
+  #   if: github.ref == 'refs/heads/main'
+    
+  #   steps:
+  #     - name: 📥 Checkout code
+  #       uses: actions/checkout@v4
+
+  #     - name: 📥 Download JAR artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: application-jar
+  #         path: transfer-service/target/
+
+  #     - name: 🐳 Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+
+  #     - name: 🐳 Build Docker Image
+  #       working-directory: transfer-service
+  #       run: |
+  #         echo "=========================================="
+  #         echo "🐳 BUILDING DOCKER IMAGE"
+  #         echo "=========================================="
+  #         cat > Dockerfile << 'EOF'
+  #         FROM eclipse-temurin:17-jre-alpine
+  #         LABEL maintainer="NPCI Training Team"
+  #         WORKDIR /app
+  #         COPY target/*.jar app.jar
+  #         EXPOSE 8080
+  #         HEALTHCHECK --interval=30s --timeout=3s \
+  #           CMD wget -qO- http://localhost:8080/api/v1/health || exit 1
+  #         ENTRYPOINT ["java", "-jar", "app.jar"]
+  #         EOF
+  #         docker build -t upi-transfer-service:latest .
+  #         docker build -t upi-transfer-service:${{ github.sha }} .
+  #         docker images | grep upi-transfer-service
+  #         echo "✅ Docker image built successfully"
+
+# =============================================================================
+# PIPELINE VISUALIZATION
+# =============================================================================
+#
+#   ┌─────────────────────────────────────────────────────────────────────┐
+#   │                    SHIFT-LEFT TEST PIPELINE                         │
+#   └─────────────────────────────────────────────────────────────────────┘
+#
+#                              ┌──────────┐
+#                              │  START   │
+#                              └────┬─────┘
+#                                   │
+#                                   ▼
+#                           ┌──────────────┐
+#                           │  Unit Tests  │ ◀── FAIL FAST (Stage 1)
+#                           │     70%      │     ~8 seconds
+#                           └──────┬───────┘
+#                                  │
+#                    ┌─────────────┼─────────────┐
+#                    │             │             │
+#                    ▼             ▼             ▼
+#            ┌────────────┐ ┌────────────┐ ┌────────────┐
+#            │Integration │ │  API Tests │ │   Code     │
+#            │   Tests    │ │     8%     │ │  Quality   │
+#            │    20%     │ └─────┬──────┘ └─────┬──────┘
+#            └─────┬──────┘       │              │
+#                  │              │              │
+#                  └──────────────┼──────────────┘
+#                                 │
+#                                 ▼
+#                          ┌────────────┐
+#                          │ E2E Tests  │
+#                          │     2%     │
+#                          └─────┬──────┘
+#                                │
+#                                ▼
+#                          ┌────────────┐
+#                          │   Build    │
+#                          │  Package   │
+#                          └─────┬──────┘
+#                                │
+#                                ▼
+#                          ┌────────────┐
+#                          │   Docker   │ ◀── Main branch only
+#                          │   Build    │
+#                          └────────────┘
+#
+# =============================================================================
+# SHIFT-LEFT TESTING PRINCIPLES DEMONSTRATED:
+# =============================================================================
+#
+# 1. FAIL FAST
+#    - Unit tests run first (fastest feedback)
+#    - Pipeline stops immediately on failure
+#
+# 2. TEST PYRAMID
+#    - More unit tests (70%) than integration tests (20%)
+#    - Fewer E2E tests (2%) - expensive but valuable
+#
+# 3. PARALLEL EXECUTION
+#    - Integration and API tests run in parallel
+#    - Reduces overall pipeline time
+#
+# 4. QUALITY GATES
+#    - Each stage must pass before proceeding
+#    - Coverage thresholds enforced
+#
+# 5. ARTIFACTS
+#    - Test results preserved for debugging
+#    - Coverage reports for analysis
+#
+# =============================================================================

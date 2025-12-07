@@ -1,0 +1,72 @@
+spring:
+  application:
+    name: upi-transfer-service
+    
+  # H2 In-Memory Database Configuration
+  datasource:
+    url: jdbc:h2:mem:upidb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+    
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+# Server Configuration
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+# Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.upi: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# OpenAPI/Swagger Configuration  
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operationsSorter: method
+    tagsSorter: alpha
+
+# Application Custom Properties
+app:
+  transfer:
+    min-amount: 1.00
+    max-amount: 100000.00
+    daily-limit: 200000.00
+    max-daily-transactions: 20
+  charges:
+    p2p-percentage: 0.00
+    p2m-percentage: 0.30
+    gst-rate: 18.00
