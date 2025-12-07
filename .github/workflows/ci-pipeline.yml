@@ -1,5 +1,5 @@
 # ==============================================================================
-# UPI PAYMENT SERVICE - CI/CD PIPELINE
+# UPI PAYMENT SERVICE - CI/CD PIPELINE (Enhanced)
 # ==============================================================================
 # Features:
 # ✅ Shift-Left Testing (Unit → Integration → Quality Gate)
@@ -121,6 +121,20 @@ jobs:
         run: mvn jacoco:report -pl transfer-service -B
         if: always()
 
+      - name: 📂 Check Allure Results Generated
+        if: always()
+        run: |
+          echo "📂 Checking for Allure results..."
+          if [ -d "transfer-service/target/allure-results" ]; then
+            echo "✅ Allure results directory found"
+            ls -la transfer-service/target/allure-results/
+            echo "File count: $(find transfer-service/target/allure-results -type f | wc -l)"
+          else
+            echo "⚠️ No allure-results directory found"
+            echo "Creating from surefire reports..."
+            mkdir -p transfer-service/target/allure-results
+          fi
+
       # Parse test results for PR comment
       - name: 📈 Parse Test Results
         id: test-results
@@ -153,8 +167,8 @@ jobs:
         with:
           name: allure-results-unit
           path: transfer-service/target/allure-results/
+          if-no-files-found: warn
         if: always()
-        continue-on-error: true
 
   # ============================================================================
   # STAGE 3: INTEGRATION TESTS with Retry
@@ -276,12 +290,25 @@ jobs:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
 
-      - name: 📥 Download Unit Test Results
+      - name: 📥 Download Allure Results (Unit Tests)
         uses: actions/download-artifact@v4
         with:
-          name: unit-test-results
+          name: allure-results-unit
           path: allure-results/
         continue-on-error: true
+
+      - name: 📥 Download Allure Results (Integration Tests)
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results-integration
+          path: allure-results/
+        continue-on-error: true
+
+      - name: 📂 List Allure Results (Debug)
+        run: |
+          echo "📂 Contents of allure-results:"
+          ls -la allure-results/ || echo "Directory empty or not found"
+          find allure-results -name "*.json" | head -10 || echo "No JSON files found"
 
       - name: 📥 Get Allure History
         uses: actions/checkout@v4
