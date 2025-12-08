@@ -1,0 +1,163 @@
+name: "🚀 CI/CD Pipeline"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: '17'
+  WORKING_DIR: 'transfer-service'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/upi-transfer-service
+
+jobs:
+  # ===========================================
+  # CI: Build & Test
+  # ===========================================
+  build-and-test:
+    name: "🧪 Build & Test"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: 🧪 Run Tests
+        working-directory: ${{ env.WORKING_DIR }}
+        run: mvn clean verify -B
+
+      - name: 📊 Test Report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: 'Test Results'
+          path: '${{ env.WORKING_DIR }}/target/surefire-reports/*.xml'
+          reporter: java-junit
+
+  # ===========================================
+  # CI: Build & Push Docker Image
+  # ===========================================
+  docker-build:
+    name: "🐳 Docker Build & Push"
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: 📦 Build JAR
+        working-directory: ${{ env.WORKING_DIR }}
+        run: mvn package -B -DskipTests
+
+      - name: 📝 Create Dockerfile
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          cat > Dockerfile << 'DOCKERFILE'
+          FROM eclipse-temurin:17-jre-alpine
+          RUN addgroup -g 1001 -S appgroup && adduser -u 1001 -S appuser -G appgroup
+          WORKDIR /app
+          COPY target/*.jar app.jar
+          USER appuser
+          EXPOSE 8080
+          ENTRYPOINT ["java", "-jar", "app.jar"]
+          DOCKERFILE
+
+      - name: 🔐 Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 Docker Meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=
+
+      - name: 🐳 Build & Push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.WORKING_DIR }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+
+  # ===========================================
+  # CD: Deploy to EC2
+  # ===========================================
+  deploy:
+    name: "🚀 Deploy to EC2"
+    runs-on: ubuntu-latest
+    needs: docker-build
+    environment: development
+    
+    steps:
+      - name: 🚀 Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          REGISTRY: ghcr.io
+          IMAGE: ${{ github.repository }}/upi-transfer-service
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_USER: ${{ github.actor }}
+        with:
+          host: ${{ secrets.EC2_HOST_DEV }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: REGISTRY,IMAGE,GH_TOKEN,GH_USER
+          script: |
+            echo "🚀 Starting deployment..."
+            
+            # Login to GHCR
+            echo $GH_TOKEN | docker login ghcr.io -u $GH_USER --password-stdin
+            
+            # Stop old container
+            docker stop upi-transfer-service 2>/dev/null || true
+            docker rm upi-transfer-service 2>/dev/null || true
+            
+            # Pull new image
+            docker pull ghcr.io/$IMAGE:latest
+            
+            # Run new container
+            docker run -d \
+              --name upi-transfer-service \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              ghcr.io/$IMAGE:latest
+            
+            # Wait and verify
+            sleep 10
+            docker ps | grep upi-transfer-service
+            
+            echo "✅ Deployment complete!"
+
+      - name: 📋 Summary
+        run: |
+          echo "## 🚀 Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | http://${{ secrets.EC2_HOST_DEV }}:8080 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health | http://${{ secrets.EC2_HOST_DEV }}:8080/actuator/health |" >> $GITHUB_STEP_SUMMARY
