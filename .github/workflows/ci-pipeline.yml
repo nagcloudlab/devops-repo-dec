@@ -32,8 +32,8 @@ name: "🎓 UPI Transfer Service - Test Pyramid CI"
 on:
   # push:
     # branches: [ main, develop, 'feature/**', 'release/**' ]
-  pull_request:
-    branches: [ main, develop ]
+  # pull_request:
+  #   branches: [ main, develop ]
   
   # ✅ Manual Trigger with Inputs
   workflow_dispatch:
