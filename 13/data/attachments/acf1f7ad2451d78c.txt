@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.upi.api.TransferControllerApiTest$VpaValidationEndpointTests
--------------------------------------------------------------------------------
-Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 9.548 s -- in com.upi.api.TransferControllerApiTest$VpaValidationEndpointTests
