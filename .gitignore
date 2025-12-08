@@ -144,3 +144,29 @@ credentials/
 *.zip
 *.tar.gz
 *.rar
+
+Add Terraform ignores
+bash# Add to .gitignore
+cat >> .gitignore << 'EOF'
+
+# ===========================================
+# Terraform
+# ===========================================
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# SSH Keys (never commit!)
+*.pem
+*.key

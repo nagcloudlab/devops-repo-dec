@@ -30,8 +30,8 @@ name: "🎓 UPI Transfer Service - Test Pyramid CI"
 # TRIGGERS
 # =============================================================================
 on:
-  push:
-    branches: [ main, develop, 'feature/**', 'release/**' ]
+  # push:
+    # branches: [ main, develop, 'feature/**', 'release/**' ]
   pull_request:
     branches: [ main, develop ]
   
