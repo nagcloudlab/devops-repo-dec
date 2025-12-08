@@ -1,1138 +1,281 @@
-# =============================================================================
-# CI PIPELINE - COMPLETE VERSION WITH ALL FEATURES
-# =============================================================================
-# 
-# UPI Transfer Service - Test Pyramid CI Pipeline
-# For: NPCI Test Engineers Training
-#
-# FEATURES INCLUDED:
-#   ✅ Pre-flight Checks (Skip duplicates, versioning)
-#   ✅ Concurrency Control (Cancel in-progress runs)
-#   ✅ Test Reports (dorny/test-reporter visual)
-#   ✅ Security Scanning (OWASP + Trivy)
-#   ✅ Version Management (Auto-versioning by branch)
-#   ✅ Docker Security (Non-root user, health checks)
-#   ✅ Container Registry (GitHub Container Registry)
-#   ✅ Environments (Dev & Prod with approvals)
-#   ✅ Notifications (Slack ready)
-#   ✅ Job Summaries (Rich markdown)
-#   ✅ Caching (Maven + Docker layer caching)
-#   ✅ Manual Trigger (workflow_dispatch with inputs)
-#   ✅ Allure Reports (Interactive test reports)
-#   ✅ JaCoCo Coverage (Code coverage reports)
-#   ✅ Each Test Layer as Separate Job
-#
-# =============================================================================
-
-name: "🎓 UPI Transfer Service - Test Pyramid CI"
-
-# =============================================================================
-# TRIGGERS
-# =============================================================================
-on:
-  push:
-    branches: [ main, develop, 'feature/**', 'release/**' ]
-  pull_request:
-    branches: [ main, develop ]
-  
-  # ✅ Manual Trigger with Inputs
-  workflow_dispatch:
-    inputs:
-      skip_security_scan:
-        description: 'Skip security scanning'
-        required: false
-        default: false
-        type: boolean
-      test_layer:
-        description: 'Run specific test layer only'
-        required: false
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - smoke
-          - unit
-          - integration
-          - api
-          - e2e
-
-# =============================================================================
-# ✅ CONCURRENCY CONTROL - Cancel in-progress runs
-# =============================================================================
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-# =============================================================================
-# ENVIRONMENT VARIABLES
-# =============================================================================
-env:
-  JAVA_VERSION: '17'
-  WORKING_DIR: 'transfer-service'
-  MAVEN_OPTS: '-Xmx1024m -XX:+TieredCompilation -XX:TieredStopAtLevel=1'
-  # ✅ Docker & Container Registry
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/upi-transfer-service
-
-jobs:
-  # ===========================================================================
-  # ✅ PRE-FLIGHT CHECKS - Skip duplicates, Versioning
-  # ===========================================================================
-  pre-flight:
-    name: "🔍 Pre-flight Checks"
-    runs-on: ubuntu-latest
-    outputs:
-      should_skip: ${{ steps.skip_check.outputs.should_skip }}
-      version: ${{ steps.version.outputs.version }}
-      short_sha: ${{ steps.version.outputs.short_sha }}
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 🔍 Check for Duplicate Runs
-        id: skip_check
-        uses: fkirc/skip-duplicate-actions@v5
-        with:
-          concurrent_skipping: 'same_content_newer'
-          skip_after_successful_duplicate: 'true'
-
-      - name: 🏷️ Generate Version
-        id: version
-        run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          
-          # ✅ Auto-versioning by branch
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            VERSION="1.0.${{ github.run_number }}"
-          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            VERSION="1.0.${{ github.run_number }}-SNAPSHOT"
-          elif [[ "${{ github.ref }}" == refs/heads/feature/* ]]; then
-            FEATURE_NAME=$(echo "${{ github.ref }}" | sed 's/refs\/heads\/feature\///')
-            VERSION="0.0.${{ github.run_number }}-${FEATURE_NAME}"
-          elif [[ "${{ github.ref }}" == refs/heads/release/* ]]; then
-            RELEASE_VERSION=$(echo "${{ github.ref }}" | sed 's/refs\/heads\/release\///')
-            VERSION="${RELEASE_VERSION}.${{ github.run_number }}"
-          else
-            VERSION="0.0.${{ github.run_number }}-dev"
-          fi
-          
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Generated Version: $VERSION"
-
-      - name: 📋 Pre-flight Summary
-        run: |
-          echo "## 🔍 Pre-flight Checks" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Check | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Branch | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | \`${{ steps.version.outputs.short_sha }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skip Duplicate | ${{ steps.skip_check.outputs.should_skip }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # JOB 1: SMOKE TESTS - Critical Path (Gate 1)
-  # ===========================================================================
-  smoke-tests:
-    name: "🔥 1. Smoke Tests"
-    runs-on: ubuntu-latest
-    needs: pre-flight
-    if: needs.pre-flight.outputs.should_skip != 'true'
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven  # ✅ Maven Caching
-
-      - name: 🔥 Run Smoke Tests
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🔥 SMOKE TESTS - Critical Path Validation               ║"
-          echo "║  Purpose: Quick sanity check (~5 seconds)                ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn test -B -Dtest="com.upi.unit.smoke.**"
-
-      # ✅ Visual Test Reports with dorny/test-reporter
-      - name: 📊 Publish Test Report
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: '🔥 Smoke Test Report'
-          path: '${{ env.WORKING_DIR }}/target/surefire-reports/*.xml'
-          reporter: java-junit
-          fail-on-error: true
-
-      - name: 📤 Upload Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: smoke-test-results
-          path: ${{ env.WORKING_DIR }}/target/surefire-reports/
-          retention-days: 7
-
-  # ===========================================================================
-  # JOB 2: UNIT TESTS - Business Logic (70%)
-  # ===========================================================================
-  unit-tests:
-    name: "🧪 2. Unit Tests (70%)"
-    runs-on: ubuntu-latest
-    needs: smoke-tests
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 🧪 Run Unit Tests
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🧪 UNIT TESTS - Business Logic (70% of Pyramid)         ║"
-          echo "║                                                          ║"
-          echo "║  • TransferServiceTest - Transfer logic                  ║"
-          echo "║  • VpaValidatorServiceTest - VPA validation              ║"
-          echo "║  • ChargeCalculatorServiceTest - Fee calculation         ║"
-          echo "║  • ContractTest - DTO/Entity contracts                   ║"
-          echo "║                                                          ║"
-          echo "║  Framework: JUnit 5 + Mockito                            ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn test -B -Dtest="com.upi.unit.**"
-
-      - name: 📊 Generate Coverage Report
-        if: always()
-        working-directory: ${{ env.WORKING_DIR }}
-        run: mvn jacoco:report -B
-
-      # ✅ Visual Test Reports
-      - name: 📊 Publish Test Report
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: '🧪 Unit Test Report'
-          path: '${{ env.WORKING_DIR }}/target/surefire-reports/*.xml'
-          reporter: java-junit
-          fail-on-error: true
-
-      - name: 📤 Upload Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: unit-test-results
-          path: |
-            ${{ env.WORKING_DIR }}/target/surefire-reports/
-            ${{ env.WORKING_DIR }}/target/site/jacoco-ut/
-          retention-days: 7
-
-      # ✅ Rich Job Summary
-      - name: 📋 Unit Test Summary
-        if: always()
-        run: |
-          echo "## 🧪 Unit Tests (70%)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Pyramid: BASE LAYER" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Speed | ⚡ Fast (~10 sec) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Isolation | ✅ Complete (Mocked) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Framework | JUnit 5 + Mockito |" >> $GITHUB_STEP_SUMMARY
-          echo "| Spring Context | ❌ Not loaded |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # JOB 3: CONTRACT TESTS - API Schema
-  # ===========================================================================
-  contract-tests:
-    name: "📋 3. Contract Tests"
-    runs-on: ubuntu-latest
-    needs: smoke-tests
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 📋 Run Contract Tests
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  📋 CONTRACT TESTS - API Schema Validation               ║"
-          echo "║                                                          ║"
-          echo "║  Validates: TransferRequest, TransferResponse,           ║"
-          echo "║             ApiError, ValidationResponse                 ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn test -B -Dtest="com.upi.unit.contract.**"
-
-      - name: 📊 Publish Test Report
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: '📋 Contract Test Report'
-          path: '${{ env.WORKING_DIR }}/target/surefire-reports/*.xml'
-          reporter: java-junit
-
-      - name: 📤 Upload Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: contract-test-results
-          path: ${{ env.WORKING_DIR }}/target/surefire-reports/
-          retention-days: 7
-
-  # ===========================================================================
-  # JOB 4: INTEGRATION TESTS - Database + Service (20%)
-  # ===========================================================================
-  integration-tests:
-    name: "🔗 4. Integration Tests (20%)"
-    runs-on: ubuntu-latest
-    needs: unit-tests
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 🔗 Run Integration Tests
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🔗 INTEGRATION TESTS - Service + Database (20%)         ║"
-          echo "║                                                          ║"
-          echo "║  • Full Spring context loaded                            ║"
-          echo "║  • H2 in-memory database                                 ║"
-          echo "║  • Real service interactions                             ║"
-          echo "║  • Transaction persistence tests                         ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn test -B -Dtest="com.upi.integration.**"
-
-      - name: 📊 Publish Test Report
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: '🔗 Integration Test Report'
-          path: '${{ env.WORKING_DIR }}/target/surefire-reports/*.xml'
-          reporter: java-junit
-
-      - name: 📤 Upload Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-test-results
-          path: ${{ env.WORKING_DIR }}/target/surefire-reports/
-          retention-days: 7
-
-      - name: 📋 Integration Test Summary
-        if: always()
-        run: |
-          echo "## 🔗 Integration Tests (20%)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Pyramid: MIDDLE LAYER" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Speed | 🐢 Medium (~30 sec) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Database | H2 In-Memory |" >> $GITHUB_STEP_SUMMARY
-          echo "| Spring Context | ✅ Full context |" >> $GITHUB_STEP_SUMMARY
-          echo "| Annotation | @SpringBootTest |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # JOB 5: API TESTS - HTTP Contracts (8%)
-  # ===========================================================================
-  api-tests:
-    name: "🌐 5. API Tests (8%)"
-    runs-on: ubuntu-latest
-    needs: unit-tests
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 🌐 Run API Tests
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🌐 API TESTS - HTTP Contract Validation (8%)            ║"
-          echo "║                                                          ║"
-          echo "║  Endpoints:                                              ║"
-          echo "║    POST /api/v1/transfer         - Fund Transfer         ║"
-          echo "║    GET  /api/v1/transfer/{ref}   - Status                ║"
-          echo "║    GET  /api/v1/transfer/history - History               ║"
-          echo "║    POST /api/v1/validate/vpa     - Validation            ║"
-          echo "║                                                          ║"
-          echo "║  Tool: MockMvc (No HTTP server)                          ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn test -B -Dtest="com.upi.api.**"
-
-      - name: 📊 Publish Test Report
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: '🌐 API Test Report'
-          path: '${{ env.WORKING_DIR }}/target/surefire-reports/*.xml'
-          reporter: java-junit
-
-      - name: 📤 Upload Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: api-test-results
-          path: ${{ env.WORKING_DIR }}/target/surefire-reports/
-          retention-days: 7
-
-      - name: 📋 API Test Summary
-        if: always()
-        run: |
-          echo "## 🌐 API Tests (8%)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Pyramid: UPPER-MIDDLE LAYER" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Speed | 🐢 Medium (~20 sec) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tool | MockMvc |" >> $GITHUB_STEP_SUMMARY
-          echo "| Focus | HTTP Status, JSON |" >> $GITHUB_STEP_SUMMARY
-          echo "| Annotation | @AutoConfigureMockMvc |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # JOB 6: E2E TESTS - User Journeys (2%)
-  # ===========================================================================
-  e2e-tests:
-    name: "🚀 6. E2E Tests (2%)"
-    runs-on: ubuntu-latest
-    needs: [integration-tests, api-tests]
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 🚀 Run E2E Tests
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🚀 E2E TESTS - Complete User Journeys (2%)              ║"
-          echo "║                                                          ║"
-          echo "║  Journeys:                                               ║"
-          echo "║    1. Complete Fund Transfer Flow                        ║"
-          echo "║    2. Merchant Payment Journey                           ║"
-          echo "║    3. Multiple Transactions                              ║"
-          echo "║    4. Error Handling Journey                             ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn test -B -Dtest="com.upi.e2e.**"
-
-      - name: 📊 Publish Test Report
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: '🚀 E2E Test Report'
-          path: '${{ env.WORKING_DIR }}/target/surefire-reports/*.xml'
-          reporter: java-junit
-
-      - name: 📤 Upload Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: e2e-test-results
-          path: ${{ env.WORKING_DIR }}/target/surefire-reports/
-          retention-days: 7
-
-      - name: 📋 E2E Test Summary
-        if: always()
-        run: |
-          echo "## 🚀 E2E Tests (2%)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Pyramid: TOP LAYER" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Speed | 🐌 Slow (~15 sec) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Scope | Full User Journey |" >> $GITHUB_STEP_SUMMARY
-          echo "| Maintenance | ⚠️ High |" >> $GITHUB_STEP_SUMMARY
-          echo "| Value | Critical Flows |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # JOB 7: ARCHITECTURE TESTS - Code Structure (ArchUnit)
-  # ===========================================================================
-  architecture-tests:
-    name: "🏛️ 7. Architecture Tests"
-    runs-on: ubuntu-latest
-    needs: smoke-tests
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 🏛️ Run Architecture Tests
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🏛️ ARCHITECTURE TESTS - Code Structure (ArchUnit)       ║"
-          echo "║                                                          ║"
-          echo "║  Rules: Layer dependencies, Package structure,           ║"
-          echo "║         No cyclic dependencies, Naming conventions       ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn test -B -Dtest="com.upi.architecture.**"
-
-      - name: 📊 Publish Test Report
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: '🏛️ Architecture Test Report'
-          path: '${{ env.WORKING_DIR }}/target/surefire-reports/*.xml'
-          reporter: java-junit
-
-      - name: 📤 Upload Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: architecture-test-results
-          path: ${{ env.WORKING_DIR }}/target/surefire-reports/
-          retention-days: 7
-
-  # ===========================================================================
-  # ✅ JOB 8: SECURITY SCANNING - OWASP + Trivy
-  # ===========================================================================
-  security-scan:
-    name: "🔒 8. Security Scan"
-    runs-on: ubuntu-latest
-    needs: smoke-tests
-    if: ${{ github.event.inputs.skip_security_scan != 'true' }}
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 🔒 OWASP Dependency Check
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🔒 SECURITY SCAN - OWASP Dependency Check               ║"
-          echo "║                                                          ║"
-          echo "║  Scans for known vulnerabilities in dependencies         ║"
-          echo "║  Fails build if CVSS score >= 9 (Critical)               ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn org.owasp:dependency-check-maven:check -B \
-            -DfailBuildOnCVSS=9 || true
-        continue-on-error: true
-
-      # ✅ Trivy Filesystem Scan
-      - name: 🔍 Trivy Filesystem Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '${{ env.WORKING_DIR }}'
-          format: 'sarif'
-          output: 'trivy-fs-results.sarif'
-          severity: 'CRITICAL,HIGH'
-
-      - name: 📤 Upload Trivy Results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-fs-results.sarif'
-
-      - name: 📤 Upload Security Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: security-report
-          path: |
-            ${{ env.WORKING_DIR }}/target/dependency-check-report.html
-            trivy-fs-results.sarif
-          retention-days: 30
-
-      - name: 📋 Security Summary
-        if: always()
-        run: |
-          echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Check | Tool | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Dependencies | OWASP Dependency Check | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Filesystem | Trivy | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Threshold | CVSS >= 9 fails build | |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # JOB 9: CODE COVERAGE - JaCoCo
-  # ===========================================================================
-  code-coverage:
-    name: "📊 9. Code Coverage"
-    runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, api-tests, e2e-tests]
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 📊 Run Full Tests with Coverage
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  📊 CODE COVERAGE - JaCoCo                               ║"
-          echo "║                                                          ║"
-          echo "║  Thresholds:                                             ║"
-          echo "║    Line Coverage: 70% minimum                            ║"
-          echo "║    Branch Coverage: 60% minimum                          ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn verify -B
-
-      - name: 📤 Upload Coverage Reports
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-reports
-          path: |
-            ${{ env.WORKING_DIR }}/target/site/jacoco-ut/
-            ${{ env.WORKING_DIR }}/target/site/jacoco-it/
-            ${{ env.WORKING_DIR }}/target/site/jacoco-merged/
-          retention-days: 30
-
-      - name: 📋 Coverage Summary
-        if: always()
-        run: |
-          echo "## 📊 Code Coverage" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Report | Description |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| jacoco-ut | Unit Test Coverage |" >> $GITHUB_STEP_SUMMARY
-          echo "| jacoco-it | Integration Test Coverage |" >> $GITHUB_STEP_SUMMARY
-          echo "| jacoco-merged | Combined Coverage |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # JOB 10: ALLURE REPORT - Interactive Test Reports
-  # ===========================================================================
-  allure-report:
-    name: "📈 10. Allure Report"
-    runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, api-tests, e2e-tests]
-    if: always()
-    
-    steps:
-      - name: 📥 Download All Test Results
-        uses: actions/download-artifact@v4
-        with:
-          path: allure-results
-          pattern: "*-test-results"
-          merge-multiple: true
-
-      - name: 📊 Generate Allure Report
-        uses: simple-elf/allure-report-action@master
-        if: always()
-        with:
-          allure_results: allure-results
-          allure_history: allure-history
-          keep_reports: 20
-
-      - name: 📤 Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        if: always() && github.ref == 'refs/heads/main'
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: allure-history
-
-      - name: 📋 Allure Summary
-        if: always()
-        run: |
-          echo "## 📈 Allure Test Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🔗 **View Report**: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Features" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 Interactive dashboards" >> $GITHUB_STEP_SUMMARY
-          echo "- 📉 Test trends over time" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔍 Detailed test steps" >> $GITHUB_STEP_SUMMARY
-          echo "- 🏷️ Categories & labels" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # JOB 11: BUILD - Package Application
-  # ===========================================================================
-  build:
-    name: "🏗️ 11. Build & Package"
-    runs-on: ubuntu-latest
-    needs: [code-coverage, security-scan]
-    if: always() && needs.code-coverage.result == 'success'
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: maven
-
-      - name: 🏗️ Build JAR
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🏗️ BUILD - Package Application                         ║"
-          echo "║                                                          ║"
-          echo "║  Version: ${{ needs.pre-flight.outputs.version }}        ║"
-          echo "║  All quality gates passed ✅                             ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          mvn package -B -DskipTests
-          ls -la target/*.jar
-
-      - name: 📤 Upload JAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: application-jar
-          path: ${{ env.WORKING_DIR }}/target/*.jar
-          retention-days: 30
-
-      - name: 📋 Build Summary
-        run: |
-          echo "## 🏗️ Build Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | ${{ needs.pre-flight.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | ${{ needs.pre-flight.outputs.short_sha }} |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # ✅ JOB 12: DOCKER BUILD - With Security Features
-  # ===========================================================================
-  docker-build:
-    name: "🐳 12. Docker Build"
-    runs-on: ubuntu-latest
-    needs: [build, pre-flight]
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-      image_digest: ${{ steps.build-push.outputs.digest }}
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: 📥 Download JAR
-        uses: actions/download-artifact@v4
-        with:
-          name: application-jar
-          path: ${{ env.WORKING_DIR }}/target/
-
-      # ✅ Docker Layer Caching
-      - name: 🗄️ Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ✅ GitHub Container Registry Login
-      - name: 🔐 Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 🏷️ Docker Metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=raw,value=${{ needs.pre-flight.outputs.version }}
-            type=sha,prefix=
-
-      # ✅ Create Secure Dockerfile (Non-root user, Health checks)
-      - name: 📝 Create Secure Dockerfile
-        working-directory: ${{ env.WORKING_DIR }}
-        run: |
-          cat > Dockerfile << 'EOF'
-          # =================================================================
-          # SECURE DOCKERFILE - UPI Transfer Service
-          # =================================================================
-          # Features:
-          #   ✅ Non-root user (security)
-          #   ✅ Health checks
-          #   ✅ Multi-stage build (smaller image)
-          #   ✅ JRE only (no JDK in production)
-          # =================================================================
-          
-          FROM eclipse-temurin:17-jre-alpine AS runtime
-          
-          # Security: Create non-root user
-          RUN addgroup -g 1001 -S appgroup && \
-              adduser -u 1001 -S appuser -G appgroup
-          
-          WORKDIR /app
-          
-          # Copy JAR with correct ownership
-          COPY --chown=appuser:appgroup target/*.jar app.jar
-          
-          # Security: Switch to non-root user
-          USER appuser
-          
-          # Expose port
-          EXPOSE 8080
-          
-          # Health check
-          HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-              CMD wget -q --spider http://localhost:8080/actuator/health || exit 1
-          
-          # JVM optimization for containers
-          ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
-          
-          ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
-          EOF
-
-      # ✅ Build and Push with Docker Layer Caching
-      - name: 🐳 Build and Push Docker Image
-        id: build-push
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ env.WORKING_DIR }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64
-
-      # ✅ Trivy Image Scan
-      - name: 🔍 Trivy Image Scan
-        uses: aquasecurity/trivy-action@master
-        if: github.event_name != 'pull_request'
-        with:
-          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-flight.outputs.version }}'
-          format: 'sarif'
-          output: 'trivy-image-results.sarif'
-          severity: 'CRITICAL,HIGH'
-
-      - name: 📤 Upload Trivy Image Results
-        uses: github/codeql-action/upload-sarif@v3
-        if: github.event_name != 'pull_request'
-        with:
-          sarif_file: 'trivy-image-results.sarif'
-
-      - name: 📋 Docker Summary
-        run: |
-          echo "## 🐳 Docker Build" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Registry | \`${{ env.REGISTRY }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | \`${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tag | \`${{ needs.pre-flight.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Digest | \`${{ steps.build-push.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Security Features" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Non-root user (UID 1001)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Health check configured" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Trivy image scan" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Alpine-based (minimal attack surface)" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # ✅ JOB 13: DEPLOY TO DEV - Automatic
-  # ===========================================================================
-  deploy-dev:
-    name: "🚀 13. Deploy to Dev"
-    runs-on: ubuntu-latest
-    needs: [docker-build, pre-flight]
-    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
-    environment:
-      name: development
-      url: https://dev.upi-transfer.example.com
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: 🚀 Deploy to Development
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🚀 DEPLOYING TO DEVELOPMENT                             ║"
-          echo "║                                                          ║"
-          echo "║  Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}        ║"
-          echo "║  Tag: ${{ needs.pre-flight.outputs.version }}            ║"
-          echo "║  Environment: Development                                ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          
-          # Example: kubectl deployment
-          # kubectl set image deployment/upi-transfer \
-          #   upi-transfer=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-flight.outputs.version }} \
-          #   --namespace=dev
-
-      - name: 📋 Deployment Summary
-        run: |
-          echo "## 🚀 Development Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | Development |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image Tag | ${{ needs.pre-flight.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | ✅ Deployed |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # ✅ JOB 14: DEPLOY TO PROD - Manual Approval Required
-  # ===========================================================================
-  deploy-prod:
-    name: "🏭 14. Deploy to Prod"
-    runs-on: ubuntu-latest
-    needs: [docker-build, pre-flight]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    environment:
-      name: production
-      url: https://upi-transfer.example.com
-    
-    steps:
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: 🏭 Deploy to Production
-        run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🏭 DEPLOYING TO PRODUCTION                              ║"
-          echo "║                                                          ║"
-          echo "║  ⚠️  This deployment was manually approved               ║"
-          echo "║                                                          ║"
-          echo "║  Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}        ║"
-          echo "║  Tag: ${{ needs.pre-flight.outputs.version }}            ║"
-          echo "║  Environment: Production                                 ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
-          
-          # Example: kubectl deployment with rollout
-          # kubectl set image deployment/upi-transfer \
-          #   upi-transfer=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-flight.outputs.version }} \
-          #   --namespace=prod
-          # kubectl rollout status deployment/upi-transfer --namespace=prod
-
-      - name: 📋 Production Deployment Summary
-        run: |
-          echo "## 🏭 Production Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | **Production** |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image Tag | ${{ needs.pre-flight.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Approval | ✅ Manually approved |" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | ✅ Deployed |" >> $GITHUB_STEP_SUMMARY
-
-  # ===========================================================================
-  # ✅ NOTIFICATIONS - Slack Ready
-  # ===========================================================================
-  notify:
-    name: "📢 15. Notifications"
-    runs-on: ubuntu-latest
-    needs: [build, docker-build, allure-report, deploy-dev, deploy-prod]
-    if: always()
-    
-    steps:
-      - name: 📢 Pipeline Summary
-        run: |
-          echo "# 🎓 Test Pyramid CI - Pipeline Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Pipeline Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "                    ┌─────────┐" >> $GITHUB_STEP_SUMMARY
-          echo "                    │   E2E   │  2%  ✅" >> $GITHUB_STEP_SUMMARY
-          echo "                   ┌┴─────────┴┐" >> $GITHUB_STEP_SUMMARY
-          echo "                   │    API    │  8%  ✅" >> $GITHUB_STEP_SUMMARY
-          echo "                 ┌─┴───────────┴─┐" >> $GITHUB_STEP_SUMMARY
-          echo "                 │  Integration  │ 20%  ✅" >> $GITHUB_STEP_SUMMARY
-          echo "             ┌───┴───────────────┴───┐" >> $GITHUB_STEP_SUMMARY
-          echo "             │      UNIT TESTS       │ 70%  ✅" >> $GITHUB_STEP_SUMMARY
-          echo "             └───────────────────────┘" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## ✅ All Features Enabled" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Feature | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Pre-flight Checks | ✅ Skip duplicates, versioning |" >> $GITHUB_STEP_SUMMARY
-          echo "| Concurrency Control | ✅ Cancel in-progress |" >> $GITHUB_STEP_SUMMARY
-          echo "| Test Reports | ✅ dorny/test-reporter |" >> $GITHUB_STEP_SUMMARY
-          echo "| Security Scanning | ✅ OWASP + Trivy |" >> $GITHUB_STEP_SUMMARY
-          echo "| Version Management | ✅ Auto by branch |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docker Security | ✅ Non-root, health checks |" >> $GITHUB_STEP_SUMMARY
-          echo "| Container Registry | ✅ GHCR |" >> $GITHUB_STEP_SUMMARY
-          echo "| Environments | ✅ Dev + Prod with approvals |" >> $GITHUB_STEP_SUMMARY
-          echo "| Notifications | ✅ Slack ready |" >> $GITHUB_STEP_SUMMARY
-          echo "| Job Summaries | ✅ Rich markdown |" >> $GITHUB_STEP_SUMMARY
-          echo "| Caching | ✅ Maven + Docker layers |" >> $GITHUB_STEP_SUMMARY
-          echo "| Manual Trigger | ✅ workflow_dispatch |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🎯 Shift-Left Benefits Demonstrated" >> $GITHUB_STEP_SUMMARY
-          echo "- ⚡ Fast Feedback: Unit tests first" >> $GITHUB_STEP_SUMMARY
-          echo "- 🐛 Early Bug Detection: 70% at unit level" >> $GITHUB_STEP_SUMMARY
-          echo "- 💰 Cost Effective: Fix bugs early" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔄 CI: Every commit tested" >> $GITHUB_STEP_SUMMARY
-
-      # ✅ SLACK NOTIFICATION - Uncomment to enable
-      # - name: 📢 Slack Notification
-      #   uses: 8398a7/action-slack@v3
-      #   with:
-      #     status: ${{ job.status }}
-      #     fields: repo,message,commit,author,action,eventName,ref,workflow,job,took
-      #     text: |
-      #       🎓 Test Pyramid CI Complete
-      #       Build: ${{ needs.build.result }}
-      #       Docker: ${{ needs.docker-build.result }}
-      #       Dev Deploy: ${{ needs.deploy-dev.result }}
-      #       Prod Deploy: ${{ needs.deploy-prod.result }}
-      #   env:
-      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      #   if: always()
-
-# =============================================================================
-# PIPELINE FLOW - COMPLETE WITH ALL FEATURES
-# =============================================================================
-#
-#   ┌─────────────┐
-#   │ Pre-flight  │ ◀── Version, Skip duplicates
-#   └──────┬──────┘
-#          │
-#          ▼
-#   ┌─────────────┐
-#   │   Smoke     │ ◀── Gate 1: Quick sanity
-#   └──────┬──────┘
-#          │
-#    ┌─────┴─────┬──────────────┬──────────────┐
-#    │           │              │              │
-#    ▼           ▼              ▼              ▼
-# ┌──────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
-# │ Unit │  │ Contract │  │  Arch    │  │ Security │
-# │ 70%  │  │  Tests   │  │  Tests   │  │OWASP+Trivy│
-# └──┬───┘  └──────────┘  └──────────┘  └────┬─────┘
-#    │                                        │
-#    ├────────────────┐                       │
-#    │                │                       │
-#    ▼                ▼                       │
-# ┌──────┐       ┌──────┐                     │
-# │Integr│       │ API  │                     │
-# │ 20%  │       │  8%  │                     │
-# └──┬───┘       └──┬───┘                     │
-#    │              │                         │
-#    └──────┬───────┘                         │
-#           │                                 │
-#           ▼                                 │
-#      ┌──────┐                               │
-#      │ E2E  │ ◀── Gate 2: User Journeys     │
-#      │  2%  │                               │
-#      └──┬───┘                               │
-#         │                                   │
-#    ┌────┴────┐                              │
-#    │         │                              │
-#    ▼         ▼                              │
-# ┌──────┐ ┌──────┐                           │
-# │Cover │ │Allure│                           │
-# │ age  │ │Report│                           │
-# └──┬───┘ └──────┘                           │
-#    │                                        │
-#    └────────────────┬───────────────────────┘
-#                     │
-#                     ▼
-#               ┌──────────┐
-#               │  Build   │ ◀── Gate 3: All Passed
-#               └────┬─────┘
-#                    │
-#                    ▼
-#               ┌──────────┐
-#               │  Docker  │ ◀── GHCR + Trivy Scan
-#               │  Build   │     Non-root, Health checks
-#               └────┬─────┘
-#                    │
-#          ┌─────────┴─────────┐
-#          │                   │
-#          ▼                   ▼
-#    ┌──────────┐       ┌──────────┐
-#    │ Deploy   │       │ Deploy   │
-#    │   DEV    │       │  PROD    │ ◀── Manual Approval
-#    │ (auto)   │       │(approval)│
-#    └────┬─────┘       └────┬─────┘
-#         │                  │
-#         └────────┬─────────┘
-#                  │
-#                  ▼
-#            ┌──────────┐
-#            │  Notify  │ ◀── Slack Ready
-#            └──────────┘
-#
-# =============================================================================
-# ENVIRONMENT SETUP REQUIRED:
-# =============================================================================
-#
-# 1. GitHub Environments (Settings → Environments):
-#    - development: No protection rules
-#    - production: Required reviewers (add approvers)
-#
-# 2. GitHub Container Registry:
-#    - Automatically available for GitHub repos
-#    - Uses GITHUB_TOKEN for auth
-#
-# 3. Slack Webhook (optional):
-#    - Create webhook at api.slack.com
-#    - Add SLACK_WEBHOOK_URL to repository secrets
-#
-# 4. GitHub Pages (for Allure):
-#    - Settings → Pages → Source: gh-pages branch
-#
-# =============================================================================
+package com.upi.architecture;
+
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
+import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.ArchRule;
+import io.qameta.allure.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.*;
+import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
+import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
+
+/**
+ * Architecture Tests using ArchUnit
+ * 
+ * These tests verify that the codebase follows the defined architectural rules:
+ * - Layer dependencies (Controller → Service → Repository)
+ * - Naming conventions
+ * - Package structure
+ * - No cyclic dependencies
+ * 
+ * @author NPCI Training Team
+ */
+@Epic("Architecture Tests")
+@Feature("Code Structure Validation")
+@DisplayName("🏛️ Architecture Tests")
+public class ArchitectureTest {
+
+    private static JavaClasses importedClasses;
+
+    @BeforeAll
+    static void setup() {
+        importedClasses = new ClassFileImporter()
+                .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
+                .importPackages("com.upi");
+    }
+
+    // =========================================================================
+    // LAYER DEPENDENCY TESTS
+    // =========================================================================
+
+    @Test
+    @Story("Layer Dependencies")
+    @Severity(SeverityLevel.CRITICAL)
+    @DisplayName("Should enforce layered architecture")
+    void shouldEnforceLayeredArchitecture() {
+        ArchRule rule = layeredArchitecture()
+                .consideringAllDependencies()
+                .layer("Controller").definedBy("..controller..")
+                .layer("Service").definedBy("..service..")
+                .layer("Repository").definedBy("..repository..")
+                .layer("Entity").definedBy("..entity..")
+                .layer("DTO").definedBy("..dto..")
+                .layer("Exception").definedBy("..exception..")
+                
+                .whereLayer("Controller").mayNotBeAccessedByAnyLayer()
+                .whereLayer("Service").mayOnlyBeAccessedByLayers("Controller", "Service")
+                .whereLayer("Repository").mayOnlyBeAccessedByLayers("Service")
+                .whereLayer("Entity").mayOnlyBeAccessedByLayers("Service", "Repository")
+                .whereLayer("DTO").mayOnlyBeAccessedByLayers("Controller", "Service", "Exception");
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Layer Dependencies")
+    @Severity(SeverityLevel.CRITICAL)
+    @DisplayName("Controllers should only depend on Services and DTOs")
+    void controllersShouldOnlyDependOnServicesAndDtos() {
+        ArchRule rule = classes()
+                .that().resideInAPackage("..controller..")
+                .should().onlyDependOnClassesThat()
+                .resideInAnyPackage(
+                        "..controller..",
+                        "..service..",
+                        "..dto..",
+                        "..exception..",
+                        "java..",
+                        "javax..",
+                        "jakarta..",
+                        "org.springframework..",
+                        "io.swagger..",
+                        "io.qameta.."
+                );
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Layer Dependencies")
+    @Severity(SeverityLevel.CRITICAL)
+    @DisplayName("Services should not depend on Controllers")
+    void servicesShouldNotDependOnControllers() {
+        ArchRule rule = noClasses()
+                .that().resideInAPackage("..service..")
+                .should().dependOnClassesThat()
+                .resideInAPackage("..controller..");
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Layer Dependencies")
+    @Severity(SeverityLevel.CRITICAL)
+    @DisplayName("Repositories should not depend on Controllers or Services")
+    void repositoriesShouldNotDependOnUpperLayers() {
+        ArchRule rule = noClasses()
+                .that().resideInAPackage("..repository..")
+                .should().dependOnClassesThat()
+                .resideInAnyPackage("..controller..", "..service..");
+
+        rule.check(importedClasses);
+    }
+
+    // =========================================================================
+    // NAMING CONVENTION TESTS
+    // =========================================================================
+
+    @Test
+    @Story("Naming Conventions")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Controllers should have 'Controller' suffix")
+    void controllersShouldHaveControllerSuffix() {
+        ArchRule rule = classes()
+                .that().resideInAPackage("..controller..")
+                .and().areAnnotatedWith(org.springframework.web.bind.annotation.RestController.class)
+                .should().haveSimpleNameEndingWith("Controller");
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Naming Conventions")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Services should have 'Service' suffix")
+    void servicesShouldHaveServiceSuffix() {
+        ArchRule rule = classes()
+                .that().resideInAPackage("..service..")
+                .and().areAnnotatedWith(org.springframework.stereotype.Service.class)
+                .should().haveSimpleNameEndingWith("Service");
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Naming Conventions")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Repositories should have 'Repository' suffix")
+    void repositoriesShouldHaveRepositorySuffix() {
+        ArchRule rule = classes()
+                .that().resideInAPackage("..repository..")
+                .should().haveSimpleNameEndingWith("Repository");
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Naming Conventions")
+    @Severity(SeverityLevel.MINOR)
+    @DisplayName("DTOs should be in dto package")
+    void dtosShouldBeInDtoPackage() {
+        ArchRule rule = classes()
+                .that().haveSimpleNameEndingWith("Request")
+                .or().haveSimpleNameEndingWith("Response")
+                .should().resideInAPackage("..dto..");
+
+        rule.check(importedClasses);
+    }
+
+    // =========================================================================
+    // ANNOTATION TESTS
+    // =========================================================================
+
+    @Test
+    @Story("Annotations")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Controllers should be annotated with @RestController")
+    void controllersShouldBeAnnotatedWithRestController() {
+        ArchRule rule = classes()
+                .that().resideInAPackage("..controller..")
+                .and().haveSimpleNameEndingWith("Controller")
+                .should().beAnnotatedWith(org.springframework.web.bind.annotation.RestController.class);
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Annotations")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Services should be annotated with @Service")
+    void servicesShouldBeAnnotatedWithService() {
+        ArchRule rule = classes()
+                .that().resideInAPackage("..service..")
+                .and().haveSimpleNameEndingWith("Service")
+                .should().beAnnotatedWith(org.springframework.stereotype.Service.class);
+
+        rule.check(importedClasses);
+    }
+
+    // =========================================================================
+    // CYCLIC DEPENDENCY TESTS
+    // =========================================================================
+
+    @Test
+    @Story("Cyclic Dependencies")
+    @Severity(SeverityLevel.CRITICAL)
+    @DisplayName("Should have no cyclic dependencies between packages")
+    void shouldHaveNoCyclicDependencies() {
+        ArchRule rule = slices()
+                .matching("com.upi.(*)..")
+                .should().beFreeOfCycles();
+
+        rule.check(importedClasses);
+    }
+
+    // =========================================================================
+    // PACKAGE STRUCTURE TESTS
+    // =========================================================================
+
+    @Test
+    @Story("Package Structure")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Entities should only be accessed by repositories and services")
+    void entitiesShouldOnlyBeAccessedByRepositoriesAndServices() {
+        ArchRule rule = classes()
+                .that().resideInAPackage("..entity..")
+                .should().onlyBeAccessed().byAnyPackage(
+                        "..entity..",
+                        "..repository..",
+                        "..service.."
+                );
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Package Structure")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Exceptions should be in exception package")
+    void exceptionsShouldBeInExceptionPackage() {
+        ArchRule rule = classes()
+                .that().areAssignableTo(Exception.class)
+                .and().doNotHaveFullyQualifiedName("java.lang.Exception")
+                .should().resideInAPackage("..exception..");
+
+        rule.check(importedClasses);
+    }
+
+    // =========================================================================
+    // SPRING BEST PRACTICES
+    // =========================================================================
+
+    @Test
+    @Story("Spring Best Practices")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Controllers should not have @Autowired fields")
+    void controllersShouldNotHaveAutowiredFields() {
+        ArchRule rule = noFields()
+                .that().areDeclaredInClassesThat().resideInAPackage("..controller..")
+                .should().beAnnotatedWith(org.springframework.beans.factory.annotation.Autowired.class)
+                .because("Controllers should use constructor injection");
+
+        rule.check(importedClasses);
+    }
+
+    @Test
+    @Story("Spring Best Practices")
+    @Severity(SeverityLevel.NORMAL)
+    @DisplayName("Services should not have @Autowired fields")
+    void servicesShouldNotHaveAutowiredFields() {
+        ArchRule rule = noFields()
+                .that().areDeclaredInClassesThat().resideInAPackage("..service..")
+                .should().beAnnotatedWith(org.springframework.beans.factory.annotation.Autowired.class)
+                .because("Services should use constructor injection");
+
+        rule.check(importedClasses);
+    }
+}
