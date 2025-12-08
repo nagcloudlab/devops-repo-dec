@@ -66,7 +66,7 @@ public class TransferService {
         // Calculate charges
         boolean isInterBank = !vpaValidator.isSameBank(request.getPayerVpa(), request.getPayeeVpa());
         var chargeResult = chargeCalculator.calculateCharges(
-                request.getAmount()+1000, request.getTransactionType(), isInterBank);
+                request.getAmount(), request.getTransactionType(), isInterBank);
 
         // Create transaction entity
         Transaction transaction = Transaction.builder()
