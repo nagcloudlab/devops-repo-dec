@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.upi.integration.TransferServiceIntegrationTest$DatabaseIntegrationTests
--------------------------------------------------------------------------------
-Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 8.931 s -- in com.upi.integration.TransferServiceIntegrationTest$DatabaseIntegrationTests
