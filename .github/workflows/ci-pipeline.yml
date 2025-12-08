@@ -1029,7 +1029,7 @@ jobs:
           echo "- 💰 Cost Effective: Fix bugs early" >> $GITHUB_STEP_SUMMARY
           echo "- 🔄 CI: Every commit tested" >> $GITHUB_STEP_SUMMARY
 
-      ✅ SLACK NOTIFICATION - Uncomment to enable
+      # ✅ SLACK NOTIFICATION - Uncomment to enable
       - name: 📢 Slack Notification
         uses: 8398a7/action-slack@v3
         with:
