@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.upi.unit.smoke.SmokeTest
+-------------------------------------------------------------------------------
+Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.252 s -- in com.upi.unit.smoke.SmokeTest
