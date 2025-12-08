@@ -63,7 +63,6 @@ jobs:
         run: |
           VERSION="1.0.${{ github.run_number }}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Version: $VERSION"
 
       - name: ☕ Setup Java
         uses: actions/setup-java@v4
@@ -106,147 +105,114 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
   # ===========================================
-  # CD: Deploy to DEV (Automatic)
+  # CD: Deploy to DEV
   # ===========================================
   deploy-dev:
     name: "🚀 Deploy DEV"
     runs-on: ubuntu-latest
     needs: docker-build
-    environment: 
-      name: development
-      url: http://${{ secrets.EC2_HOST_DEV }}:8080
+    environment: development
     
     steps:
       - name: 🚀 Deploy to DEV
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          REGISTRY: ghcr.io
-          IMAGE: ${{ github.repository }}/upi-transfer-service
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_USER: ${{ github.actor }}
         with:
           host: ${{ secrets.EC2_HOST_DEV }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: REGISTRY,IMAGE,GH_TOKEN,GH_USER
           script: |
             echo "🚀 Deploying to DEV..."
-            echo $GH_TOKEN | docker login ghcr.io -u $GH_USER --password-stdin
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker stop upi-transfer-service 2>/dev/null || true
             docker rm upi-transfer-service 2>/dev/null || true
-            docker pull ghcr.io/$IMAGE:latest
+            docker pull ghcr.io/${{ github.repository }}/upi-transfer-service:latest
             docker run -d \
               --name upi-transfer-service \
               --restart unless-stopped \
               -p 8080:8080 \
               -e SPRING_PROFILES_ACTIVE=dev \
-              ghcr.io/$IMAGE:latest
+              ghcr.io/${{ github.repository }}/upi-transfer-service:latest
             sleep 10
             docker ps | grep upi-transfer-service
             echo "✅ DEV Deployment complete!"
 
       - name: 📋 Summary
         run: |
-          echo "## 🚀 DEV Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 DEV Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | Development |" >> $GITHUB_STEP_SUMMARY
-          echo "| URL | http://${{ secrets.EC2_HOST_DEV }}:8080 |" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================
-  # CD: Deploy to TEST (Automatic after DEV)
+  # CD: Deploy to TEST
   # ===========================================
   deploy-test:
     name: "🧪 Deploy TEST"
     runs-on: ubuntu-latest
     needs: [docker-build, deploy-dev]
-    environment: 
-      name: test
-      url: http://${{ secrets.EC2_HOST_TEST }}:8080
+    environment: test
     
     steps:
       - name: 🧪 Deploy to TEST
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          REGISTRY: ghcr.io
-          IMAGE: ${{ github.repository }}/upi-transfer-service
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_USER: ${{ github.actor }}
         with:
           host: ${{ secrets.EC2_HOST_TEST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: REGISTRY,IMAGE,GH_TOKEN,GH_USER
           script: |
             echo "🧪 Deploying to TEST..."
-            echo $GH_TOKEN | docker login ghcr.io -u $GH_USER --password-stdin
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker stop upi-transfer-service 2>/dev/null || true
             docker rm upi-transfer-service 2>/dev/null || true
-            docker pull ghcr.io/$IMAGE:latest
+            docker pull ghcr.io/${{ github.repository }}/upi-transfer-service:latest
             docker run -d \
               --name upi-transfer-service \
               --restart unless-stopped \
               -p 8080:8080 \
               -e SPRING_PROFILES_ACTIVE=test \
-              ghcr.io/$IMAGE:latest
+              ghcr.io/${{ github.repository }}/upi-transfer-service:latest
             sleep 10
             docker ps | grep upi-transfer-service
             echo "✅ TEST Deployment complete!"
 
       - name: 📋 Summary
         run: |
-          echo "## 🧪 TEST Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 TEST Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | Test |" >> $GITHUB_STEP_SUMMARY
-          echo "| URL | http://${{ secrets.EC2_HOST_TEST }}:8080 |" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================
-  # CD: Deploy to PROD (Manual Approval Required)
+  # CD: Deploy to PROD (Approval Required)
   # ===========================================
   deploy-prod:
     name: "🏭 Deploy PROD"
     runs-on: ubuntu-latest
     needs: [docker-build, deploy-test]
     if: github.ref == 'refs/heads/main'
-    environment: 
-      name: production
-      url: http://${{ secrets.EC2_HOST_PROD }}:8080
+    environment: production
     
     steps:
       - name: 🏭 Deploy to PROD
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          REGISTRY: ghcr.io
-          IMAGE: ${{ github.repository }}/upi-transfer-service
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_USER: ${{ github.actor }}
         with:
           host: ${{ secrets.EC2_HOST_PROD }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: REGISTRY,IMAGE,GH_TOKEN,GH_USER
           script: |
             echo "🏭 Deploying to PRODUCTION..."
-            echo $GH_TOKEN | docker login ghcr.io -u $GH_USER --password-stdin
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker stop upi-transfer-service 2>/dev/null || true
             docker rm upi-transfer-service 2>/dev/null || true
-            docker pull ghcr.io/$IMAGE:latest
+            docker pull ghcr.io/${{ github.repository }}/upi-transfer-service:latest
             docker run -d \
               --name upi-transfer-service \
               --restart unless-stopped \
               -p 8080:8080 \
               -e SPRING_PROFILES_ACTIVE=prod \
-              ghcr.io/$IMAGE:latest
+              ghcr.io/${{ github.repository }}/upi-transfer-service:latest
             sleep 10
             docker ps | grep upi-transfer-service
             echo "✅ PRODUCTION Deployment complete!"
 
       - name: 📋 Summary
         run: |
-          echo "## 🏭 PRODUCTION Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "## 🏭 PRODUCTION Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | **PRODUCTION** |" >> $GITHUB_STEP_SUMMARY
-          echo "| URL | http://${{ secrets.EC2_HOST_PROD }}:8080 |" >> $GITHUB_STEP_SUMMARY
           echo "| Approval | ✅ Manually Approved |" >> $GITHUB_STEP_SUMMARY
